@@ -266,7 +266,7 @@ async function generate(){
     v = await r.json();
     if (!r.ok || v.error) throw new Error(v.error || ('HTTP '+r.status));
   }catch(e){
-    setStatus('Couldn’t read that video from YouTube: ' + e.message + '. If it’s private or scheduled, publish it (or make it unlisted) first.', true);
+    setStatus('YouTube didn’t answer that time. Hit Generate again; if it keeps failing, check the video is public or unlisted (not private or scheduled).', true);
     $('#go').disabled = false; return;
   }
   state.video = v; state.showAllTags = false;

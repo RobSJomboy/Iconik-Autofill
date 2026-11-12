@@ -10,7 +10,7 @@
  */
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 const json = (b, s = 200) => new Response(JSON.stringify(b), {
-  status: s, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300', ...CORS } });
+  status: s, headers: { 'Content-Type': 'application/json', 'Cache-Control': s === 200 ? 'public, max-age=300' : 'no-store', ...CORS } });
 
 function shape(id, d) {
   const v = d.videoDetails || {}, m = (d.microformat || {}).playerMicroformatRenderer || {};
@@ -29,8 +29,28 @@ async function viaPlayer(id) {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
     body: JSON.stringify({ videoId: id, context: { client: { clientName: 'WEB', clientVersion: '2.20250101.00.00', hl: 'en', gl: 'US' } } }),
   });
-  if (!r.ok) return null;
-  return shape(id, await r.json());
+  if (!r.ok) { lastWhy.push('player HTTP ' + r.status); return null; }
+  const d = await r.json();
+  const out = shape(id, d);
+  if (!out) lastWhy.push('player: ' + JSON.stringify(d.playabilityStatus || {}).slice(0, 200));
+  return out;
+}
+let lastWhy = [];
+
+// Official YouTube Data API v3 — used whenever the YT_KEY secret is set (1 quota unit per lookup, 10,000/day free).
+const isoDur = (d) => { const m = (d || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || []; return (+m[1]||0)*86400 + (+m[2]||0)*3600 + (+m[3]||0)*60 + (+m[4]||0); };
+async function viaDataApi(id, key) {
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${id}&key=${key}`);
+  const d = await r.json();
+  if (!r.ok) { lastWhy.push('data api: ' + ((d.error || {}).message || r.status)); return null; }
+  const it = (d.items || [])[0];
+  if (!it) { lastWhy.push('data api: no such video'); return null; }
+  const sn = it.snippet || {}, th = sn.thumbnails || {};
+  return {
+    id, title: sn.title || '', channel: sn.channelTitle || '', publishDate: sn.publishedAt || '',
+    lengthSeconds: isoDur((it.contentDetails || {}).duration), keywords: sn.tags || [], description: sn.description || '',
+    category: '', thumbnail: (th.maxres || th.high || th.default || {}).url || '', via: 'data-api',
+  };
 }
 
 async function viaWatchPage(id) {
@@ -38,7 +58,7 @@ async function viaWatchPage(id) {
     headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36', 'Accept-Language': 'en-US', 'Cookie': 'CONSENT=YES+1' } });
   const html = await r.text();
   const m = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var|<\/script)/s);
-  if (!m) return null;
+  if (!m) { lastWhy.push('watch HTTP ' + r.status + ' len ' + html.length + ' ' + (html.match(/<title>[^<]*/)||[''])[0]); return null; }
   try { return shape(id, JSON.parse(m[1])); } catch { return null; }
 }
 
@@ -95,9 +115,11 @@ export default {
     const m = url.pathname.match(/^\/v\/([A-Za-z0-9_-]{11})\/?$/);
     if (!m) return json({ ok: true, service: 'jomboy-yt', usage: 'GET /v/<11-char videoId>' });
     const id = m[1];
+    lastWhy = [];
     let out = null;
-    try { out = await viaPlayer(id); } catch {}
+    if (env.YT_KEY) { try { out = await viaDataApi(id, env.YT_KEY); } catch { lastWhy.push('data api threw'); } }
+    if (!out) { try { out = await viaPlayer(id); } catch {} }
     if (!out) { try { out = await viaWatchPage(id); } catch {} }
-    return out ? json(out) : json({ error: 'YouTube did not return this video (private, unlisted-and-blocked, or wrong ID)' }, 404);
+    return out ? json(out) : json({ error: 'YouTube did not return this video (private, unlisted-and-blocked, or wrong ID)', why: lastWhy }, 404);
   },
 };
