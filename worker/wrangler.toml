@@ -1,0 +1,7 @@
+name = "jomboy-yt"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# Cloudflare Workers AI — writes the one-sentence description and picks dropdown values.
+[ai]
+binding = "AI"

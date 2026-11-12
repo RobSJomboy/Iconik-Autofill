@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Iconik Autofill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one paste bar on top; below it the Iconik panel, field for field in Iconik's order, beside the YouTube source it came from. */
+:root{
+  --ground:#0d1922; --panel:#132331; --well:#0a141c; --rule:#24384a; --ink:#e8edf1; --dim:#8ea2b3;
+  --gold:#c8a84b; --gold-ink:#0d1922; --ok:#4fb98a; --warn:#e0a84a; --ai:#8fb4ff;
+  --display:"Bebas Neue",Impact,"Arial Narrow",sans-serif;
+  --body:"Archivo",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --ground:#eef1f4; --panel:#ffffff; --well:#f5f7f9; --rule:#d3dbe2; --ink:#0d1922; --dim:#566a7b;
+  --gold:#8a6a1c; --gold-ink:#ffffff; --ok:#1f8a5b; --warn:#a8670f; --ai:#2d5fc4; color-scheme:light}}
+:root[data-theme="light"]{
+  --ground:#eef1f4; --panel:#ffffff; --well:#f5f7f9; --rule:#d3dbe2; --ink:#0d1922; --dim:#566a7b;
+  --gold:#8a6a1c; --gold-ink:#ffffff; --ok:#1f8a5b; --warn:#a8670f; --ai:#2d5fc4; color-scheme:light}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ground);color:var(--ink);font:15px/1.5 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+.plate{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--gold);padding-bottom:10px}
+.plate h1{font:400 clamp(38px,6vw,56px)/.9 var(--display);letter-spacing:.02em;margin:0}
+.plate h1 span{color:var(--gold)}
+.plate p{margin:4px 0 0;color:var(--dim);max-width:62ch}
+.label{font:500 11px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+
+.paste{display:flex;gap:10px;flex-wrap:wrap}
+.paste input{flex:1 1 320px;min-width:0;background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;font-size:17px}
+.paste input::placeholder{color:var(--dim)}
+.btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:10px 14px;cursor:pointer;font-weight:600}
+.btn:hover{border-color:var(--gold)}
+.btn.go{background:var(--gold);color:var(--gold-ink);border-color:var(--gold);font:400 22px/1 var(--display);letter-spacing:.06em;padding:14px 26px}
+.btn:disabled{opacity:.5;cursor:default}
+.status{min-height:22px;font:500 13px/1.4 var(--mono);color:var(--dim)}
+.status.err{color:var(--warn)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;min-width:0}
+.panel>header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.panel>header h2{font:400 24px/1 var(--display);letter-spacing:.04em;margin:0}
+
+.field{display:grid;grid-template-columns:150px minmax(0,1fr) auto;gap:6px 12px;align-items:start;padding:11px 16px;border-bottom:1px solid var(--rule)}
+.field:last-child{border-bottom:0}
+@media (max-width:520px){.field{grid-template-columns:minmax(0,1fr) auto}.field .name{grid-column:1/-1}}
+.name{font-weight:600;font-size:13px;padding-top:7px}
+.name .req{color:var(--gold)}
+.src{display:block;font:500 10px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-top:3px;color:var(--dim)}
+.src.yt{color:var(--ok)} .src.ai{color:var(--ai)} .src.guess{color:var(--warn)} .src.you{color:var(--gold)}
+.val input,.val select,.val textarea{width:100%;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:7px 10px;min-width:0}
+.val textarea{resize:vertical;min-height:64px}
+.val .mono{font-family:var(--mono);font-size:13px}
+.copy{border:1px solid var(--rule);background:transparent;border-radius:5px;padding:6px 10px;cursor:pointer;font:500 11px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.copy:hover{color:var(--ink);border-color:var(--gold)}
+.copy.done{color:var(--ok);border-color:var(--ok)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--rule);background:var(--well);border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:var(--gold-ink);font-weight:600}
+.chips .more{border-style:dashed;color:var(--dim)}
+
+.source{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.source h3{margin:0;font-size:17px;line-height:1.3;text-wrap:balance}
+.meta{display:flex;flex-wrap:wrap;gap:6px 14px;font:500 12px/1.3 var(--mono);color:var(--dim)}
+.desc{background:var(--well);border:1px solid var(--rule);border-radius:6px;padding:10px 12px;white-space:pre-wrap;font-size:13px;max-height:360px;overflow:auto;overflow-wrap:anywhere}
+.desc mark{background:var(--gold);color:var(--gold-ink);border-radius:3px;padding:0 2px}
+.kw{display:flex;flex-wrap:wrap;gap:4px}
+.kw span{font:12px/1.3 var(--mono);color:var(--dim);border:1px solid var(--rule);border-radius:4px;padding:2px 6px}
+.empty{padding:28px 16px;color:var(--dim)}
+.empty ol{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--rule);border-radius:10px;padding:0;width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+dialog::backdrop{background:rgba(5,10,14,.7)}
+dialog .body{padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;overflow:auto;max-height:calc(100vh - 190px)}
+dialog textarea{width:100%;min-height:150px;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:8px;font:13px/1.45 var(--mono)}
+dialog footer{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--rule)}
+.note{font-size:13px;color:var(--dim)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="plate">
+    <div>
+      <h1>Iconik <span>Autofill</span></h1>
+      <p>Paste the YouTube link. Every field comes back in the same order as the Iconik metadata panel, ready to copy across.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="editLists" type="button">Dropdown lists</button>
+    </div>
+  </div>
+
+  <form class="paste" id="pasteForm">
+    <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+      placeholder="https://www.youtube.com/watch?v=…  or youtu.be/…  or a Shorts link" aria-label="YouTube link">
+    <button class="btn go" id="go" type="submit">Generate</button>
+  </form>
+  <div class="status" id="status" role="status"></div>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="mdTitle">
+      <header>
+        <h2 id="mdTitle">Metadata</h2>
+        <button class="copy" id="copyAll" type="button" disabled>Copy all as text</button>
+      </header>
+      <div id="fields"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="srcTitle">
+      <header><h2 id="srcTitle">From YouTube</h2><span class="label" id="srcId"></span></header>
+      <div id="source" class="empty">
+        <strong>How it works</strong>
+        <ol>
+          <li>Paste the published YouTube link and hit Generate.</li>
+          <li>Title, date, link, episode ID and episode # come straight from YouTube.</li>
+          <li>Sponsor is matched against the description. Tags, type and the one-sentence description are AI picks, so give them a look.</li>
+          <li>Hit Copy on each field and paste it into Iconik. Fix anything here first and the copy follows.</li>
+        </ol>
+      </div>
+    </section>
+  </div>
+</div>
+
+<dialog id="listsDlg" aria-labelledby="listsTitle">
+  <form method="dialog" id="listsForm">
+    <footer style="border-top:0;border-bottom:1px solid var(--rule)">
+      <h2 id="listsTitle" style="font:400 24px/1 var(--display);letter-spacing:.04em;margin:0">Dropdown lists</h2>
+      <span class="note">One option per line, spelled exactly like Iconik.</span>
+    </footer>
+    <div class="body" id="listsBody"></div>
+    <footer>
+      <span class="note" id="listsNote">Saved lists are shared with everyone who uses this page.</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn" value="cancel" type="submit">Cancel</button>
+        <button class="btn go" id="saveLists" type="button" style="font-size:18px;padding:10px 18px">Save for everyone</button>
+      </div>
+    </footer>
+  </form>
+</dialog>
+
+<script>
+const YT_API = 'https://jomboy-yt.jomboymedia.workers.dev';
+const RELAY  = 'https://jomboy-relay.jomboymedia.workers.dev/r/iconik-lists';
+
+// Starter dropdown lists. The shared copy saved from "Dropdown lists" replaces these.
+const DEFAULT_LISTS = {
+  sponsor: ['None','Fanatics','DraftKings','FanDuel','Underdog','PrizePicks'],
+  mlbFootage: ['No','Yes'],
+  topTags: ['Offseason','Free Agency','Trades','Hot Stove','Spring Training','Opening Day','Trade Deadline','Postseason','World Series','All-Star Game','Awards','Rules','Umpires','Fights','Bloopers','Prospects','Draft',
+    'Angels','Astros','Athletics','Blue Jays','Braves','Brewers','Cardinals','Cubs','Diamondbacks','Dodgers','Giants','Guardians','Mariners','Marlins','Mets','Nationals','Orioles','Padres','Phillies','Pirates','Rangers','Rays','Red Sox','Reds','Rockies','Royals','Tigers','Twins','White Sox','Yankees'],
+  videoType: ['Full Episode','Clip','Short','Live Stream'],
+  sport: ['Baseball - MLB','Football - NFL','Basketball - NBA','Hockey - NHL','Cricket','Other'],
+  contentTag: ['Podcast','Breakdown','Reaction','Interview','Game Show','Highlights','Explainer'],
+};
+const LIST_LABELS = {sponsor:'Sponsor',mlbFootage:'MLB Footage?',topTags:'Top Tags',videoType:'Video Type',sport:'Sport & League',contentTag:'Content Tag'};
+let LISTS = structuredClone(DEFAULT_LISTS);
+
+// Field order mirrors the Iconik metadata panel.
+const FIELDS = [
+  {k:'title',      name:'Title', req:true},
+  {k:'published',  name:'Date & Time Published', req:true, mono:true},
+  {k:'link',       name:'YouTube Link', req:true, mono:true},
+  {k:'episodeId',  name:'Episode ID', req:true, mono:true},
+  {k:'sponsor',    name:'Sponsor', req:true, list:'sponsor'},
+  {k:'mlbFootage', name:'MLB Footage?', req:true, list:'mlbFootage'},
+  {k:'topTags',    name:'Top Tags', req:true, list:'topTags', multi:true},
+  {k:'oneSentence',name:'One Sentence Description', req:true, long:true},
+  {k:'episodeNum', name:'Episode #', mono:true},
+  {k:'videoType',  name:'Video Type', req:true, list:'videoType'},
+  {k:'sport',      name:'Sport & League', list:'sport'},
+  {k:'contentTag', name:'Content Tag', req:true, list:'contentTag'},
+];
+const SRC_TEXT = {yt:'From YouTube', link:'From the link', ai:'AI pick · check it', guess:'Best guess · check it', you:'Edited', none:''};
+
+let state = {values:{}, src:{}, video:null, showAllTags:false};
+const $ = (s, el=document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const setStatus = (msg, err=false) => { const s=$('#status'); s.textContent=msg; s.className='status'+(err?' err':''); };
+
+function videoIdFrom(text){
+  const t = text.trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(t)) return t;
+  try{
+    const u = new URL(t.startsWith('http') ? t : 'https://'+t);
+    if (/youtu\.be$/.test(u.hostname)) return u.pathname.slice(1,12);
+    if (u.searchParams.get('v')) return u.searchParams.get('v').slice(0,11);
+    const m = u.pathname.match(/\/(?:shorts|live|embed|v)\/([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+  }catch{}
+  return null;
+}
+
+// "2026-11-11T09:50:14-08:00" → "11/11/2026 12:50 PM" in New York time
+function fmtPublished(iso){
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',hour12:true}).formatToParts(d).map(x=>[x.type,x.value]));
+  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute} ${p.dayPeriod}`;
+}
+const fmtLength = s => { s=+s||0; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
+
+function episodeTail(desc){
+  const cut = desc.search(/Download and subscribe to the pod|Subscribe to our other YouTube channels|Follow us on social media/i);
+  return cut > 0 ? desc.slice(0, cut) : desc;
+}
+const hasWord = (hay, w) => new RegExp('(^|[^a-z0-9])' + w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '($|[^a-z0-9])').test(hay);
+const findOpt = (list, re) => (LISTS[list]||[]).find(o => re.test(o)) || '';
+
+// Fast rule-based pass: shows something useful instantly, before the AI answers.
+function ruleGuesses(v){
+  const g = {}, s = {};
+  const top = episodeTail(v.description).toLowerCase();
+  const hay = (v.title + ' ' + top + ' ' + v.keywords.join(' ')).toLowerCase();
+
+  const sp = LISTS.sponsor.find(o => !/^none$/i.test(o) && hasWord(top, o));
+  g.sponsor = sp || findOpt('sponsor', /^none$/i); s.sponsor = sp ? 'yt' : 'guess';
+
+  g.mlbFootage = /courtesy of mlb|mlb footage|video courtesy|©\s*mlb/i.test(v.description) ? findOpt('mlbFootage',/^yes$/i) : findOpt('mlbFootage',/^no$/i);
+  s.mlbFootage = 'guess';
+
+  g.topTags = LISTS.topTags.filter(t => hasWord((v.title + ' ' + top).toLowerCase(), t)).slice(0,5); s.topTags = 'guess';
+
+  const len = v.lengthSeconds;
+  // An episode number at the end of the title is the tell for a full episode; runtime alone isn't (clips run 20+ min).
+  g.videoType = len && len <= 70 ? findOpt('videoType',/short/i) : episodeNumber(v.title) ? findOpt('videoType',/full|episode/i) : findOpt('videoType',/clip/i);
+  s.videoType = 'guess';
+
+  g.sport = /\bnfl\b|football/.test(hay) && !/\bmlb\b|baseball/.test(hay) ? findOpt('sport',/nfl/i)
+          : /cricket/.test(hay) ? findOpt('sport',/cricket/i)
+          : /\bmlb\b|baseball/.test(hay) ? findOpt('sport',/mlb|baseball/i) : '';
+  s.sport = 'guess';
+
+  g.contentTag = /podcast/.test(hay) && episodeNumber(v.title) ? findOpt('contentTag',/podcast/i) : '';
+  s.contentTag = 'guess';
+  g.oneSentence = ''; s.oneSentence = 'none';
+  return {g, s};
+}
+
+function episodeNumber(title){
+  const m = title.match(/\|\s*#?\s*(\d{2,5})\s*$/) || title.match(/\b(?:ep(?:isode)?\.?\s*|#)(\d{1,5})\b/i);
+  return m ? m[1] : '';
+}
+
+async function generate(){
+  const id = videoIdFrom($('#url').value);
+  if (!id){ setStatus('That doesn’t look like a YouTube link. Paste the full link from the browser or the Share button.', true); return; }
+  $('#go').disabled = true;
+  setStatus('Pulling from YouTube…');
+  let v;
+  try{
+    const r = await fetch(`${YT_API}/v/${id}`);
+    v = await r.json();
+    if (!r.ok || v.error) throw new Error(v.error || ('HTTP '+r.status));
+  }catch(e){
+    setStatus('Couldn’t read that video from YouTube: ' + e.message + '. If it’s private or scheduled, publish it (or make it unlisted) first.', true);
+    $('#go').disabled = false; return;
+  }
+  state.video = v; state.showAllTags = false;
+  const {g, s} = ruleGuesses(v);
+  state.values = {
+    title: v.title, published: fmtPublished(v.publishDate), link: `https://www.youtube.com/watch?v=${id}`,
+    episodeId: id, episodeNum: episodeNumber(v.title), ...g,
+  };
+  state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ...s};
+  renderFields(); renderSource();
+  setStatus('YouTube fields are in. Asking AI for the description and tags…');
+
+  try{
+    const r = await fetch(`${YT_API}/suggest`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({video:{title:v.title, channel:v.channel, lengthSeconds:v.lengthSeconds, keywords:v.keywords, description:v.description}, lists:LISTS})});
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || ('HTTP '+r.status));
+    // AI only fills fields nobody has touched, and never overrides a sponsor found in the description.
+    const apply = (k, val) => {
+      if (state.src[k] === 'you') return;
+      if (k === 'sponsor' && state.src.sponsor === 'yt') return;
+      if (Array.isArray(val) ? !val.length : !val) return;
+      state.values[k] = val; state.src[k] = 'ai';
+    };
+    ['oneSentence','topTags','contentTag','videoType','sport','sponsor','mlbFootage'].forEach(k => apply(k, a[k]));
+    renderFields();
+    setStatus('Done. Blue labels are AI picks, orange are guesses. Give those a look, then copy across.');
+  }catch(e){
+    setStatus('YouTube fields are ready. The AI picks didn’t come back (' + e.message + '), so the description and tags need filling by hand.', true);
+  }
+  $('#go').disabled = false;
+}
+
+function valueText(k){
+  const v = state.values[k];
+  return Array.isArray(v) ? v.join(', ') : (v ?? '');
+}
+
+function renderFields(){
+  const box = $('#fields');
+  if (!state.video){
+    box.innerHTML = FIELDS.map(f => `<div class="field"><div class="name">${esc(f.name)}${f.req?' <span class="req">*</span>':''}</div><div class="val"><input disabled aria-label="${esc(f.name)}" placeholder="—"></div><span></span></div>`).join('');
+    $('#copyAll').disabled = true; return;
+  }
+  box.innerHTML = FIELDS.map(f => {
+    const v = state.values[f.k] ?? '';
+    const src = state.src[f.k] || 'none';
+    let ctrl;
+    if (f.multi){
+      const opts = LISTS[f.list] || [];
+      const sel = new Set(v || []);
+      const shown = state.showAllTags ? opts : opts.filter(o => sel.has(o));
+      ctrl = `<div class="chips" data-k="${f.k}">${shown.map(o=>`<button type="button" class="chip" aria-pressed="${sel.has(o)}" data-tag="${esc(o)}">${esc(o)}</button>`).join('')}
+        <button type="button" class="chip more" data-more="1">${state.showAllTags ? 'Hide unpicked' : (sel.size ? '+ Pick more' : 'Pick tags')}</button></div>`;
+    } else if (f.list){
+      const opts = LISTS[f.list] || [];
+      const extra = v && !opts.includes(v) ? [v] : [];
+      ctrl = `<select id="f-${f.k}" data-k="${f.k}"><option value="">Not selected</option>${[...opts,...extra].map(o=>`<option${o===v?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    } else if (f.long){
+      ctrl = `<textarea id="f-${f.k}" data-k="${f.k}" placeholder="Waiting on the AI… or write it here">${esc(v)}</textarea>`;
+    } else {
+      ctrl = `<input id="f-${f.k}" data-k="${f.k}" class="${f.mono?'mono':''}" value="${esc(v)}" spellcheck="false">`;
+    }
+    return `<div class="field"><label class="name" for="f-${f.k}">${esc(f.name)}${f.req?' <span class="req">*</span>':''}<span class="src ${src}">${SRC_TEXT[src]||''}</span></label>
+      <div class="val">${ctrl}</div><button type="button" class="copy" data-copy="${f.k}">Copy</button></div>`;
+  }).join('');
+  $('#copyAll').disabled = false;
+}
+
+function renderSource(){
+  const v = state.video, el = $('#source');
+  if (!v) return;
+  el.className = 'source';
+  $('#srcId').textContent = v.id;
+  const sp = state.values.sponsor;
+  let d = esc(v.description);
+  if (sp && !/^none$/i.test(sp)) d = d.replace(new RegExp('('+sp.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'), '<mark>$1</mark>');
+  el.innerHTML = `<h3>${esc(v.title)}</h3>
+    <div class="meta"><span>${esc(v.channel)}</span><span>${fmtLength(v.lengthSeconds)}</span><span>${esc(fmtPublished(v.publishDate))} ET</span></div>
+    <div><div class="label" style="margin-bottom:6px">Description</div><div class="desc">${d || '<em>No description</em>'}</div></div>
+    ${v.keywords.length ? `<div><div class="label" style="margin-bottom:6px">YouTube tags</div><div class="kw">${v.keywords.map(k=>`<span>${esc(k)}</span>`).join('')}</div></div>` : ''}`;
+}
+
+async function copyText(text, btn){
+  try{ await navigator.clipboard.writeText(text); }
+  catch{
+    const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+    try{ document.execCommand('copy'); }catch{} t.remove();
+  }
+  if (btn){ const o = btn.textContent; btn.textContent = 'Copied'; btn.classList.add('done'); setTimeout(()=>{btn.textContent=o; btn.classList.remove('done');}, 1200); }
+}
+
+// Edits
+$('#fields').addEventListener('input', e => {
+  const k = e.target.dataset.k; if (!k) return;
+  state.values[k] = e.target.value; state.src[k] = 'you';
+  const s = e.target.closest('.field').querySelector('.src'); if (s){ s.className='src you'; s.textContent=SRC_TEXT.you; }
+});
+$('#fields').addEventListener('click', e => {
+  const c = e.target.closest('[data-copy]');
+  if (c){ copyText(valueText(c.dataset.copy), c); return; }
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  if (chip.dataset.more){ state.showAllTags = !state.showAllTags; renderFields(); return; }
+  const cur = new Set(state.values.topTags || []);
+  cur.has(chip.dataset.tag) ? cur.delete(chip.dataset.tag) : cur.add(chip.dataset.tag);
+  state.values.topTags = LISTS.topTags.filter(t => cur.has(t)); state.src.topTags = 'you';
+  renderFields();
+});
+$('#copyAll').addEventListener('click', e => copyText(FIELDS.map(f => `${f.name}: ${valueText(f.k)}`).join('\n'), e.target));
+$('#pasteForm').addEventListener('submit', e => { e.preventDefault(); generate(); });
+$('#url').addEventListener('paste', () => setTimeout(() => { if (videoIdFrom($('#url').value)) generate(); }, 0));
+
+// Shared dropdown lists, kept on the Jomboy relay so one edit fixes it for everybody.
+async function loadLists(){
+  try{
+    const r = await fetch(RELAY); const j = await r.json();
+    if (j && typeof j === 'object' && j.lists){
+      for (const k of Object.keys(DEFAULT_LISTS)) if (Array.isArray(j.lists[k]) && j.lists[k].length) LISTS[k] = j.lists[k];
+    }
+  }catch{}
+}
+$('#editLists').addEventListener('click', () => {
+  $('#listsBody').innerHTML = Object.keys(LIST_LABELS).map(k =>
+    `<label><div class="label" style="margin-bottom:6px">${esc(LIST_LABELS[k])}</div><textarea id="list-${k}" spellcheck="false">${esc((LISTS[k]||[]).join('\n'))}</textarea></label>`).join('');
+  $('#listsNote').textContent = 'Saved lists are shared with everyone who uses this page.';
+  $('#listsDlg').showModal();
+});
+$('#saveLists').addEventListener('click', async () => {
+  const next = {};
+  for (const k of Object.keys(LIST_LABELS)) next[k] = $('#list-'+k).value.split('\n').map(s=>s.trim()).filter(Boolean);
+  try{
+    const r = await fetch(RELAY, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({lists:next, savedAt:new Date().toISOString()})});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    LISTS = next; $('#listsDlg').close(); renderFields();
+    setStatus('Dropdown lists saved for everyone.');
+  }catch(e){ $('#listsNote').textContent = 'Couldn’t save (' + e.message + '). Check your connection and try again.'; }
+});
+
+renderFields();
+loadLists();
+</script>
+</body>
+</html>
