@@ -155,15 +155,14 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
 const YT_API = 'https://jomboy-yt.jomboymedia.workers.dev';
 const RELAY  = 'https://jomboy-relay.jomboymedia.workers.dev/r/iconik-lists';
 
-// Starter dropdown lists. The shared copy saved from "Dropdown lists" replaces these.
+// The real Iconik dropdown options (pulled 2026-11-12). The shared copy saved from "Dropdown lists" replaces these.
 const DEFAULT_LISTS = {
-  sponsor: ['None','Fanatics','DraftKings','FanDuel','Underdog','PrizePicks'],
+  sponsor: ["1. NOT APPLICABLE", "5hourenergy", "@nycsevens", "AcedOut", "adidas", "AeroPress", "Affordable Jerseys", "AG1 (Athletic Greens)", "Amazon", "AmericanCrew", "AmericanGiant", "Amtrak", "AppleCard", "AppleTV", "arenaclub", "ArtofWords", "ashoc", "ATHLETHC", "AthleticGreens", "Auction of Champions", "Autograph", "babbel", "Backyard Baseball", "BallySports", "Bareburger", "BatPeppermill", "BearMattress", "beatbox", "BespokePost", "BestWestern", "BetterHelp", "BigLeagueChew", "BILT", "BiltRewards", "binho", "BinhoBoard", "Birddogs", "BlackboxSports", "BlackFire", "BlastMotion", "Blitzball", "Bloomberg", "BlueChew", "BlueMoon", "BodyArmor", "Bonobos", "Booking.com", "bosch", "BrickhouseNutrution", "BRUNT", "Budweiser", "Caldera+Lab", "CandlewyckDiner", "Candy", "Cannadips", "CaptainMorgan", "Cash App", "CharityBuzz", "Cheers", "chris'coffee", "chrisgatesfitness", "Chubbies", "com2Us", "conzuri", "Coors Banquet", "Coors Light", "CoPilot", "Corona", "Courtyard.io", "CozyEarth", "Create", "CSGCards", "Cuts", "DirecTV", "DraftKings", "DugoutMugs", "ElGato", "Ethos", "Everyplate", "Express VPN", "Fabletics", "Factor", "Fanatics Marketplace", "Fanatics Sportsbook", "Far-B-Q", "Farm Hounds", "farmersdog", "Field of Dreams", "fitbod", "Foco", "foco_24", "Ford", "ForgedStout", "Fortect", "FreshDirect", "FTX", "FuboCanada", "FuboTV", "fum", "Fundrise", "GabiInsurance", "GameStock", "gatoradegx", "Geologie", "GLD", "Goodr", "GregMorrisCards", "groovelife", "Gruns", "Gusto", "Gymshark", "Harry's", "Hatflags", "HBO", "HelloFresh", "Hims", "Hittrax", "Hofbets", "Hollow Socks", "Homerun Clash 2", "House of Hoodies", "HouseofAtlas", "HudsonValleyRenegades", "Huel", "HungryJackPancakes", "Hydrant", "Hyperice", "icepodcompany", "Indeed", "Jackpot", "Johnnie-O", "JoyMode", "justbats", "Keeps", "kershawbeef", "KFC", "Kicks Under Cost", "KIND", "Kindred", "Kingsford", "kushydreams", "Lasik", "Launchpad", "Lids", "Lightbox", "Linkedin", "LinkedInTalentSolutions", "LMNT", "LongHaul", "LongIslandRiptide", "Loupe", "Lucy", "MagicSpoon", "Mando", "Manscaped", "Mars Men", "Mastercard", "Masterworks", "Match5Trivia", "Mazer", "MiracleBrand", "Mizzen&Main", "mlb9innings", "MLB_Rivals", "MLBtheShow", "Momentous", "Moomoo", "MorningBrew", "MovaGlobes", "Mtndew", "Mugsy", "MunkPack", "NASCAR", "National Car Rental", "NationalBaseballHallofFame", "NBC Sports", "neatburger", "neurohacker", "NHL", "NHTSA", "nike", "NLL", "Nolan'sNanaBread", "Noom", "Nutrafol", "Olipop", "OmahaSteaks", "Orgain", "OsoRojoHotSauce", "outwest", "Peacock", "perplexity", "Pestie", "Pikkit", "Pins&Aces", "PPV", "PristineAuction", "Pro Baseball Experience", "PropFinder", "ProVelocityBat", "PSA", "rag&bone", "Railriders", "Rapsodo", "Raycon", "RexMD", "Rhoback", "Rhone", "Ridge", "Rise", "Ro", "RocketMoney", "Roman", "RSVLTS", "Runmaka", "Sam Adams", "Scotts", "SeatGeek", "SeeYesGames", "SegalLawFirm", "ShadyRays", "shopify", "SidelineSwap", "SigningDaySports", "SKIMS", "SoFi", "SonyMusic", "SonyPictures", "SparkCatch", "SportPetUSA", "SportsCardInvestor", "SportsManagementWorldwide", "square", "Squints Apparel", "StadiumMapArt", "Stathead", "StoryWorth", "StuffedGrassfedBurger", "SugarGolf", "supercuts", "SuperlostCoffee", "SuperMegaBaseball", "T-Mobile", "TallOrder", "TaskRabbit", "tecovas", "TheRidge", "TheTailor", "TommyJohn", "Topps", "TradeCoffee", "TravelCentersofAmerica", "Tree Rolls", "TropicalHockeyLeague", "Trueclassic", "TurtleBeach", "Tushy", "Ultra", "Under 5' 10", "Under Armour", "Upside", "VIIA", "Vincero", "Virgin Galactic", "Vizio", "Volo Sports", "Warby Parker", "waterbird", "Waterboy", "whatnot", "WINReality", "Xfinity", "YesPLZCoffee", "ZBiotics", "Adobe Express", "Citizen", "Monarch", "Uncle Ben's Rice", "Quince", "ASPCA", "Postmates", "FOX One", "Jack Archer", "Fanatics Sports & Casino", "TBS", "Mohegan Sun"],
   mlbFootage: ['No','Yes'],
-  topTags: ['Offseason','Free Agency','Trades','Hot Stove','Spring Training','Opening Day','Trade Deadline','Postseason','World Series','All-Star Game','Awards','Rules','Umpires','Fights','Bloopers','Prospects','Draft',
-    'Angels','Astros','Athletics','Blue Jays','Braves','Brewers','Cardinals','Cubs','Diamondbacks','Dodgers','Giants','Guardians','Mariners','Marlins','Mets','Nationals','Orioles','Padres','Phillies','Pirates','Rangers','Rays','Red Sox','Reds','Rockies','Royals','Tigers','Twins','White Sox','Yankees'],
-  videoType: ['Full Episode','Clip','Short','Live Stream'],
-  sport: ['Baseball - MLB','Football - NFL','Basketball - NBA','Hockey - NHL','Cricket','Other'],
-  contentTag: ['Podcast','Breakdown','Reaction','Interview','Game Show','Highlights','Explainer'],
+  topTags: ['MLB'],
+  videoType: ['Longform','Short','Live'],
+  sport: ["Archery - World Archery Para Championship", "Badminton - Indonesia Open", "Badminton - Denmark Open", "Badminton - Hong Kong Badminton Association", "Badminton - Malaysia Masters", "Badminton - Malaysian Open", "Bandy - Men's Bandy Championship", "Baseball - AAPB", "Baseball - Australian Baseball league", "Baseball - Baseball5", "Baseball - Caribbean Series", "Baseball - Dominican League", "Baseball - Dominican Professional Baseball League", "Baseball - Dominican Winter League", "Baseball - Frontier League", "Baseball - High School", "Baseball - Japan Series", "Baseball - Junior League World Series", "Baseball - KBO", "Baseball - Little League World Series", "Baseball - LVBP", "Baseball - Minor League", "Baseball - MLB", "Baseball - MPL", "Baseball - NCAA", "Baseball - Northwoods League Baseball", "Baseball - NPB", "Baseball - Superpesis", "Baseball - Venezuelan Baseball League", "Baseball - WBC", "Baseball - World Cup", "Basketball - Americup", "Basketball - Big 3", "Basketball - CEBL", "Basketball - Euro League", "Basketball - EuroBasket Women", "Basketball - FIBA", "Basketball - FIBA 3x3", "Basketball - High School", "Basketball - LBA", "Basketball - NBA", "Basketball - NBA (Argentina)", "Basketball - NBL", "Basketball - NCAA", "Basketball - Olympics", "Basketball - Philadelphia Catholic Boys League", "Basketball - Sals NBL", "Basketball - Unicycle", "Basketball - WNBA", "Beach Korfball - World Games", "Blitzball - Warehouse", "Bobsled - IBSF", "Bocce - Ohio Bocce League", "Bowling - NCAA", "Bowling - PBA", "Boxing - MVP", "Calcio - Storico Fiorentino", "Cliff Diving - Red Bull", "Cornhole - ACL", "Cricket - Asia Cup", "Cricket - BBL", "Cricket - CPL", "Cricket - European Cricket League", "Cricket - IPL", "Cricket - Legends League", "Cricket - LMS", "Cricket - MLC", "Cricket - MPL", "Cricket - NCL", "Cricket - PSL", "Cricket - T10", "Cricket - T20", "Cricket - The Ashes", "Cricket - The Hundred", "Cricket - Women's Premier League", "Cricket - Women's World Cup", "Cricket - World Cup", "Cricket - World Test Championship", "Cricket - WPL", "Curling - Brier", "Curling - National Curling Championship", "Curling - World Championship", "Cycle-Ball - World Cup", "Cycling - Milano-Sanremo", "Cycling - Tour De Flanders", "Cycling - UAE Tour", "Darts - Bahrain Masters", "Darts - German Open", "Darts - Professional Darts Corporation", "Darts - World Championship", "Darts - World Cup of Darts", "Darts - World Series", "Disc Golf - Disc Golf Pro Tour", "Disc Golf - European Open", "Disc Golf - Ledgestone Open", "Disc Golf - Professional Disc Golf Association", "Disc Golf - Waco Charity Open", "Discflect - PDFA", "Discgolf - Northwest Discgolf Championship", "Diving - Olympics", "Dodgeball - NCAA", "Dodgeball - World Championship", "Field Hockey - FIH", "Field Hockey - NCAA", "Field Hockey - Olympics", "Fighting - Thai Fight League", "Figure Skating", "Fishing - Major League Fishing", "Floorball - WFC", "Football - AFL", "Football - Allianz", "Football - Arena Football", "Football - CFL", "Football - European League", "Football - High School", "Football - IFL", "Football - JUCO", "Football - LGFA", "Football - NCAA", "Football - NFL", "Football - NFL Flag Football Championships", "Football - U Sports League", "Football - UFL", "Football - United Football League", "Football - USFL", "Football - XFL", "Frisbee - NCAA", "Frisbee - UFA", "Futsal", "Futsal - World Cup", "Golf - Latin America Amateur", "Gymnastics - NCAA", "Handball - Danish Women's League", "Handball - EHF", "Handball - IHF", "Handball - Paralympics", "Handball - PHL", "Handball - World Championship", "Hockey - AHL", "Hockey - British Elite League", "Hockey - ECHL", "Hockey - IIHF", "Hockey - KHL", "Hockey - NCAA", "Hockey - NHL", "Hockey - OK Liga", "Hockey - PHF", "Hockey - PWHL", "Hockey - World Juniors", "Hurling - AIB", "Hurling - All-Ireland Intermediate Club Football Championship", "Hurling - GAA", "Hurling - Munster Hurling League", "Hurling - National Hurling League", "Hurling - Waterford Senior Hurling Championship", "Kabaddi - PKL", "Lacross - NLL", "Lacrosse - NCAA", "Lacrosse - PLL", "Lacrosse - WLL", "Lacrosse - Women's World Box Lacrosse Championship", "Long Jump - Paralympics", "Motoball - German", "Padel - Alpine Paris Major", "Padel - FPT", "Padel - Hexagon Cup", "Padel - Premier Padel", "Pickleball - APP", "Pickleball - MLP", "Pickleball - PPA", "Pole Vault - Olympics", "Racing - Championship Off-Road Racing", "Racing - Cyclocross", "Racing - Nascar Regional Series", "Rugby - AFL", "Rugby - Hong Kong 7s", "Rugby - NRL", "Rugby - Premiership", "Rugby - Six Nations Championship", "Rugby - Super Rugby Pacific League", "Rugby - The Rugby Championship", "Rugby - United Rugby Championship", "Rugby - Wheelchair Super League", "Rugby - Women's World Cup", "Rugby - World Cup", "Skateboarding - Tony Hawk: Vert", "Skateboarding - X-Games", "Skiing - Alpine World Cup", "Skiing - X-Games", "Slamball", "Slap Kabaddi", "Snooker - World Championship", "Snowboard - X Games", "Soccer - A League", "Soccer - Africa Cup of Nations", "Soccer - Bahraini Premier League", "Soccer - Belgium Pro League", "Soccer - Brazilian Series", "Soccer - Bundesliga", "Soccer - Campeonato Brasileiro Série A", "Soccer - Canadian Premier League", "Soccer - Champions League", "Soccer - CONCACAF", "Soccer - EE Disability Cup", "Soccer - EFL", "Soccer - Elite Two", "Soccer - Eliteserien", "Soccer - EPL", "Soccer - FIFA Beach Soccer World Cup", "Soccer - Friendlies", "Soccer - Gaelic", "Soccer - I-League", "Soccer - I-League 3", "Soccer - Kings Nation WC", "Soccer - Libyan Football Federation", "Soccer - Liga DIMAYOR", "Soccer - Liga MX", "Soccer - Liga Profesional de Fútbol", "Soccer - MLS", "Soccer - National Independent Soccer Association", "Soccer - NCAA", "Soccer - NFL", "Soccer - NWSL", "Soccer - Paralympics", "Soccer - Premier League", "Soccer - Premier League (Argentina)", "Soccer - Queens League", "Soccer - RSL", "Soccer - Russian Premier League", "Soccer - Southern League", "Soccer - UEFA Women's Championship", "Soccer - USL", "Soccer - USL League Two", "Soccer - V.League 1", "Soccer - World Cup", "Softball - AUSL", "Softball - High School", "Softball - LLSWS", "Softball - Men's World Cup", "Softball - National Open Women’s Championship", "Softball - NCAA", "Softball - Senior League Softball World Series", "Speed Skating - Youth Olympic Games", "Spikeball", "Steeplechase", "Sumo - Grand Sumo Tournament", "Sumo - Japan Sumo Association", "Sumo - World Championships", "Swimming - Paralympics", "Table Tennis - World Table Tennis", "Tennis - ATP", "Tennis - BNP Paribas Open", "Tennis - Dubai Tennis Championship", "Tennis - Monte Carlo Masters", "Tennis - U.S. Open", "Teqball - Teqball Tour", "Track - Diamond League", "Track - European 20k Race Walk Championship", "Track - European U18 Championships", "Track - High School", "Track - NCAA", "Track - Penn Relays Master Division", "Track - World Athletics", "Track - World Championships", "Ultimate Disc - AUDL", "Volleyball - AVP", "Volleyball - Beach Volleyball NCAA", "Volleyball - Beach Volleyball World Championship", "Volleyball - NCAA", "Volleyball - Pan-American", "Volleyball - PVF", "Water Polo - NCAA", "Weightlifting - Strongman Classic", "Wrestling - Beach Wrestling", "Wrestling - Fargo", "Wrestling - Final X", "Wrestling - High School", "Wrestling - NCAA", "Pole Vault - NCAA", "Wrestling - Pan-American Championships"],
+  contentTag: ['N/A'],
 };
 const LIST_LABELS = {sponsor:'Sponsor',mlbFootage:'MLB Footage?',topTags:'Top Tags',videoType:'Video Type',sport:'Sport & League',contentTag:'Content Tag'};
 let LISTS = structuredClone(DEFAULT_LISTS);
@@ -219,6 +218,47 @@ function episodeTail(desc){
 }
 const hasWord = (hay, w) => new RegExp('(^|[^a-z0-9])' + w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '($|[^a-z0-9])').test(hay);
 const findOpt = (list, re) => (LISTS[list]||[]).find(o => re.test(o)) || '';
+const NONE_RE = /not applicable|^none$|^n\/a$/i;
+
+// Sponsor names that are also everyday words: only count them as the exact brand spelling, or as a .com / @handle.
+const GENERIC = new Set(['create','candy','cuts','cheers','rise','ultra','lucy','upside','ridge','jackpot','autograph','lightbox','launchpad','keeps','mando','loupe','kind','ro','fum','ppv','gld','square','scotts','foco','cheers','long haul','longhaul','loupe','beatbox','candy','tree rolls','hydrant','supercuts','lasik','waterboy','mazer','cash app']);
+// A paragraph reads like an ad read when it has one of these.
+const AD_CUE = /download|use (?:code|promo)|promo code|sponsor|brought to you|presented by|thanks to|visit|go to|sign up|\.com\b|% off|first order|free (?:trial|shipping)|terms apply|21\+|offer|get (?:started|yours)|the app\b|link (?:below|in)/i;
+const squash = s => s.toLowerCase().replace(/[^a-z0-9]/g,'');
+function sponsorRegex(o){
+  // "AthleticGreens" → athletic[sep]greens, "Mizzen&Main" → mizzen[sep]main, case-insensitive with word edges.
+  const parts = o.replace(/([a-z])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (!parts.length) return null;
+  return new RegExp('(^|[^a-z0-9])(' + parts.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join("[^a-z0-9]{0,3}(?:and[^a-z0-9]{1,2})?") + ')(s?)($|[^a-z0-9])', 'i');
+}
+// Finds the sponsor in the episode part of the description. Earliest ad paragraph wins, then the most specific name.
+function findSponsor(desc){
+  const paras = episodeTail(desc).split(/\n\s*\n/).filter(p => AD_CUE.test(p));
+  const hits = [];
+  paras.forEach((p, pi) => {
+    const sq = squash(p);
+    for (const o of LISTS.sponsor){
+      if (NONE_RE.test(o)) continue;
+      const key = squash(o); if (key.length < 2) continue;
+      let hit = null;
+      if (GENERIC.has(o.toLowerCase())){
+        const name = o.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        const m = p.match(new RegExp('(?:sponsored by|thanks to|presented by|brought to you by|download|visit)\\s+(?:the\\s+)?()(' + name + ')(?=$|[^A-Za-z0-9])', 'i'))
+               || p.match(new RegExp('(@|\\b)(' + key + ')(?:\\.com|\\b(?=\\s+(?:app|code)\\b))', 'i'));
+        if (m) hit = m[2];
+      } else {
+        // "AG1 (Athletic Greens)" matches on either name.
+        for (const alias of o.split(/\s*[()]\s*/).filter(Boolean)){ const re = sponsorRegex(alias), m = re && p.match(re); if (m){ hit = m[2]; break; } }
+        if (hit) {}
+        else if (key.length >= 7 && sq.includes(key)) hit = o;          // "The Farmer's Dog" → farmersdog
+        else { const d = p.match(new RegExp('(?:@|\\b)(' + key + ')(?=\\.com|\\.co\\b)', 'i')); if (d) hit = d[1]; }
+      }
+      if (hit) hits.push({o, hit, pi, at: p.toLowerCase().indexOf(hit.toLowerCase()), len: key.length});
+    }
+  });
+  hits.sort((a,b) => a.pi-b.pi || b.len-a.len || a.at-b.at);
+  return hits[0] || null;
+}
 
 // Fast rule-based pass: shows something useful instantly, before the AI answers.
 function ruleGuesses(v){
@@ -226,26 +266,28 @@ function ruleGuesses(v){
   const top = episodeTail(v.description).toLowerCase();
   const hay = (v.title + ' ' + top + ' ' + v.keywords.join(' ')).toLowerCase();
 
-  const sp = LISTS.sponsor.find(o => !/^none$/i.test(o) && hasWord(top, o));
-  g.sponsor = sp || findOpt('sponsor', /^none$/i); s.sponsor = sp ? 'yt' : 'guess';
+  const sp = findSponsor(v.description);
+  state.sponsorHit = sp ? sp.hit : '';
+  g.sponsor = sp ? sp.o : findOpt('sponsor', NONE_RE); s.sponsor = sp ? 'yt' : 'guess';
 
   g.mlbFootage = /courtesy of mlb|mlb footage|video courtesy|©\s*mlb/i.test(v.description) ? findOpt('mlbFootage',/^yes$/i) : findOpt('mlbFootage',/^no$/i);
   s.mlbFootage = 'guess';
 
-  g.topTags = LISTS.topTags.filter(t => hasWord((v.title + ' ' + top).toLowerCase(), t)).slice(0,5); s.topTags = 'guess';
+  // Top Tags is open type-ahead in Iconik; the house default is MLB.
+  g.topTags = LISTS.topTags.includes('MLB') ? ['MLB'] : LISTS.topTags.slice(0,1); s.topTags = 'guess';
 
+  // Live = it was streamed live. Short = YouTube serves it at /shorts/ (the worker checks). Everything else is Longform.
   const len = v.lengthSeconds;
-  // An episode number at the end of the title is the tell for a full episode; runtime alone isn't (clips run 20+ min).
-  g.videoType = len && len <= 70 ? findOpt('videoType',/short/i) : episodeNumber(v.title) ? findOpt('videoType',/full|episode/i) : findOpt('videoType',/clip/i);
-  s.videoType = 'guess';
+  const isShort = v.short === true || (v.short == null && len && len <= 60);
+  g.videoType = v.live ? findOpt('videoType',/^live/i) : isShort ? findOpt('videoType',/^short/i) : findOpt('videoType',/^long/i);
+  s.videoType = (v.live || v.short != null) ? 'yt' : 'guess';
 
-  g.sport = /\bnfl\b|football/.test(hay) && !/\bmlb\b|baseball/.test(hay) ? findOpt('sport',/nfl/i)
-          : /cricket/.test(hay) ? findOpt('sport',/cricket/i)
-          : /\bmlb\b|baseball/.test(hay) ? findOpt('sport',/mlb|baseball/i) : '';
+  g.sport = /\bnfl\b/.test(hay) && !/\bmlb\b|baseball/.test(hay) ? findOpt('sport',/^Football - NFL$/i)
+          : /\bmlb\b|baseball/.test(hay) || /talkin.? baseball|jomboy/i.test(v.channel||'') ? findOpt('sport',/^Baseball - MLB$/i) : '';
   s.sport = 'guess';
 
-  g.contentTag = /podcast/.test(hay) && episodeNumber(v.title) ? findOpt('contentTag',/podcast/i) : '';
-  s.contentTag = 'guess';
+  g.contentTag = LISTS.contentTag.length === 1 ? LISTS.contentTag[0] : '';
+  s.contentTag = LISTS.contentTag.length === 1 ? 'yt' : 'guess';
   g.oneSentence = ''; s.oneSentence = 'none';
   return {g, s};
 }
@@ -281,7 +323,7 @@ async function generate(){
 
   try{
     const r = await fetch(`${YT_API}/suggest`, {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({video:{title:v.title, channel:v.channel, lengthSeconds:v.lengthSeconds, keywords:v.keywords, description:v.description}, lists:LISTS})});
+      body: JSON.stringify({video:{title:v.title, channel:v.channel, lengthSeconds:v.lengthSeconds, short:v.short, live:v.live, keywords:v.keywords, description:v.description}, lists:{sponsor:LISTS.sponsor, sport:LISTS.sport, mlbFootage:LISTS.mlbFootage}})});
     const a = await r.json();
     if (!r.ok || a.error) throw new Error(a.error || ('HTTP '+r.status));
     // AI only fills fields nobody has touched, and never overrides a sponsor found in the description.
@@ -291,7 +333,7 @@ async function generate(){
       if (Array.isArray(val) ? !val.length : !val) return;
       state.values[k] = val; state.src[k] = 'ai';
     };
-    ['oneSentence','topTags','contentTag','videoType','sport','sponsor','mlbFootage'].forEach(k => apply(k, a[k]));
+    ['oneSentence','sport','sponsor','mlbFootage'].forEach(k => apply(k, a[k]));
     renderFields();
     setStatus('Done. Blue labels are AI picks, orange are guesses. Give those a look, then copy across.');
   }catch(e){
@@ -321,6 +363,9 @@ function renderFields(){
       const shown = state.showAllTags ? opts : opts.filter(o => sel.has(o));
       ctrl = `<div class="chips" data-k="${f.k}">${shown.map(o=>`<button type="button" class="chip" aria-pressed="${sel.has(o)}" data-tag="${esc(o)}">${esc(o)}</button>`).join('')}
         <button type="button" class="chip more" data-more="1">${state.showAllTags ? 'Hide unpicked' : (sel.size ? '+ Pick more' : 'Pick tags')}</button></div>`;
+    } else if (f.list && (LISTS[f.list]||[]).length > 12){
+      const opts = LISTS[f.list];
+      ctrl = `<input id="f-${f.k}" data-k="${f.k}" list="dl-${f.k}" value="${esc(v)}" placeholder="Type to search ${opts.length} options" spellcheck="false" autocomplete="off"><datalist id="dl-${f.k}">${opts.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>`;
     } else if (f.list){
       const opts = LISTS[f.list] || [];
       const extra = v && !opts.includes(v) ? [v] : [];
@@ -341,9 +386,9 @@ function renderSource(){
   if (!v) return;
   el.className = 'source';
   $('#srcId').textContent = v.id;
-  const sp = state.values.sponsor;
+  const hit = state.sponsorHit;
   let d = esc(v.description);
-  if (sp && !/^none$/i.test(sp)) d = d.replace(new RegExp('('+sp.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'), '<mark>$1</mark>');
+  if (hit) d = d.replace(new RegExp('('+esc(hit).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'), '<mark>$1</mark>');
   el.innerHTML = `<h3>${esc(v.title)}</h3>
     <div class="meta"><span>${esc(v.channel)}</span><span>${fmtLength(v.lengthSeconds)}</span><span>${esc(fmtPublished(v.publishDate))} ET</span></div>
     <div><div class="label" style="margin-bottom:6px">Description</div><div class="desc">${d || '<em>No description</em>'}</div></div>

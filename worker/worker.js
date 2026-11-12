@@ -1,8 +1,8 @@
 /**
  * Jomboy YouTube lookup — feeds the Iconik metadata helper.
  *
- *   GET  /v/<videoId>  → { id, title, channel, publishDate, lengthSeconds, keywords, description, thumbnail }
- *   POST /suggest      { video, lists } → { oneSentence, topTags, contentTag, videoType, sport, sponsor, mlbFootage }
+ *   GET  /v/<videoId>  → { id, title, channel, publishDate, lengthSeconds, keywords, description, thumbnail, live, short }
+ *   POST /suggest      { video, lists } → { oneSentence, sport, sponsor, mlbFootage }
  *                      (Workers AI; it may only answer with values that exist in `lists`)
  *
  * Browsers can't read YouTube's data directly (CORS), so this asks YouTube's player endpoint
@@ -40,7 +40,7 @@ let lastWhy = [];
 // Official YouTube Data API v3 — used whenever the YT_KEY secret is set (1 quota unit per lookup, 10,000/day free).
 const isoDur = (d) => { const m = (d || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || []; return (+m[1]||0)*86400 + (+m[2]||0)*3600 + (+m[3]||0)*60 + (+m[4]||0); };
 async function viaDataApi(id, key) {
-  const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${id}&key=${key}`);
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails&id=${id}&key=${key}`);
   const d = await r.json();
   if (!r.ok) { lastWhy.push('data api: ' + ((d.error || {}).message || r.status)); return null; }
   const it = (d.items || [])[0];
@@ -50,7 +50,18 @@ async function viaDataApi(id, key) {
     id, title: sn.title || '', channel: sn.channelTitle || '', publishDate: sn.publishedAt || '',
     lengthSeconds: isoDur((it.contentDetails || {}).duration), keywords: sn.tags || [], description: sn.description || '',
     category: '', thumbnail: (th.maxres || th.high || th.default || {}).url || '', via: 'data-api',
+    live: !!it.liveStreamingDetails || (sn.liveBroadcastContent && sn.liveBroadcastContent !== 'none'),
   };
+}
+
+// YouTube serves a Short at /shorts/<id> (200) and redirects anything else to /watch (303).
+async function isShort(id) {
+  try {
+    const r = await fetch(`https://www.youtube.com/shorts/${id}`, { method: 'HEAD', redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (r.status === 200) return true;
+    if (r.status >= 300 && r.status < 400) return false;
+  } catch {}
+  return null;
 }
 
 async function viaWatchPage(id) {
@@ -75,18 +86,15 @@ async function suggest(env, body) {
 TITLE: ${v.title}
 CHANNEL: ${v.channel}
 LENGTH: ${Math.round((v.lengthSeconds || 0) / 60)} minutes
-KIND: ${(v.lengthSeconds || 0) <= 70 ? 'a Short (vertical, under a minute)' : /\|\s*#?\s*\d{2,5}\s*$/.test(v.title || '') ? 'a full podcast episode (the title ends in its episode number)' : 'a clip cut from an episode (no episode number in the title)'}
+KIND: ${v.live ? 'a live stream' : v.short ? 'a Short (vertical, under three minutes)' : /\|\s*#?\s*\d{2,5}\s*$/.test(v.title || '') ? 'a full podcast episode (the title ends in its episode number)' : 'a clip cut from an episode (no episode number in the title)'}
 YOUTUBE TAGS: ${(v.keywords || []).join(', ')}
 DESCRIPTION:
 ${trimDescription(v.description || '')}
 
 Answer with JSON only, using these keys. Every dropdown answer MUST be copied exactly from its list, or "" if none fits.
 - "oneSentence": one complete sentence, 14-30 words, with a subject and a verb, telling a reader what happens in this video, e.g. "The guys react to a blockbuster deadline trade and argue over whether it actually fixes the rotation." (only an example of the style; describe THIS video) Do not just restate the title. Plain and specific, no hype, no hashtags, no host names unless the description names them. Do not start with "In this episode". Never use the word "fans".
-- "topTags": array of up to 5 values from [${list('topTags')}]
-- "contentTag": one value from [${list('contentTag')}]
-- "videoType": one value from [${list('videoType')}]
-- "sport": one value from [${list('sport')}]
-- "sponsor": one value from [${list('sponsor')}] — the brand the description advertises, or the "none" option
+- "sport": one value from [${list('sport')}] — the sport and league the video is about
+- "sponsor": one value from [${list('sponsor')}] — the brand the description runs an ad read for (download this app, use code, visit this site). If the description has no ad, answer the "NOT APPLICABLE" option. A team, league or network just being talked about is not a sponsor.
 - "mlbFootage": one value from [${list('mlbFootage')}] — only "yes" if the description credits MLB video/footage`;
   const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
     messages: [{ role: 'user', content: prompt }], max_tokens: 400, temperature: 0.2,
@@ -95,11 +103,11 @@ Answer with JSON only, using these keys. Every dropdown answer MUST be copied ex
   let out = r.response;
   if (typeof out === 'string') { const m = out.match(/\{[\s\S]*\}/); out = m ? JSON.parse(m[0]) : {}; }
   // Never hand back a value Iconik doesn't have.
-  const pick = (k, val) => (L[k] || []).find((o) => o.toLowerCase() === String(val || '').toLowerCase()) || '';
+  const sq = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const pick = (k, val) => { const t = sq(val); if (!t) return '';
+    const opts = L[k] || []; return opts.find((o) => sq(o) === t) || (t.length >= 6 && opts.find((o) => sq(o).endsWith(t))) || ''; };
   return {
     oneSentence: String(out.oneSentence || '').trim(),
-    topTags: [...new Set((Array.isArray(out.topTags) ? out.topTags : []).map((t) => pick('topTags', t)).filter(Boolean))],
-    contentTag: pick('contentTag', out.contentTag), videoType: pick('videoType', out.videoType),
     sport: pick('sport', out.sport), sponsor: pick('sponsor', out.sponsor), mlbFootage: pick('mlbFootage', out.mlbFootage),
   };
 }
@@ -120,6 +128,7 @@ export default {
     if (env.YT_KEY) { try { out = await viaDataApi(id, env.YT_KEY); } catch { lastWhy.push('data api threw'); } }
     if (!out) { try { out = await viaPlayer(id); } catch {} }
     if (!out) { try { out = await viaWatchPage(id); } catch {} }
+    if (out) out.short = out.lengthSeconds && out.lengthSeconds <= 180 ? await isShort(id) : false;
     return out ? json(out) : json({ error: 'YouTube did not return this video (private, unlisted-and-blocked, or wrong ID)', why: lastWhy }, 404);
   },
 };
