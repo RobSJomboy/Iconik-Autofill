@@ -128,7 +128,10 @@ const FIELD_LABELS = {
   title: 'Title', published: 'Date & Time Published', link: 'YouTube Link', episodeId: 'Episode ID',
   sponsor: 'Sponsor', mlbFootage: 'MLB Footage?', topTags: 'Top Tags', oneSentence: 'One Sentence Description',
   episodeNum: 'Episode #', videoType: 'Video Type', sport: 'Sport & League', contentTag: 'Content Tag',
+  metaDone: 'All Metadata Updated?', thumbDone: 'Thumbnails Uploaded?',
 };
+// Toggles the worker sets itself; the page never sends them.
+const TOGGLES = new Set(['metaDone', 'thumbDone']);
 const sq = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 async function ik(env, path, init = {}) {
@@ -210,12 +213,58 @@ async function findAssets(env, body) {
   return [...seen.values()];
 }
 
+// ── Poster (Iconik calls the asset's cover image a "custom keyframe" of type POSTER) ──
+// 1. POST files/v1/assets/<id>/custom_keyframe/?content_type=…  → keyframe with a pre-signed upload_url
+// 2. upload the bytes there   3. mark it CLOSED   4. POST custom_keyframe/<poster_id>/ to make it the asset's poster
+async function thumbBytes(t) {
+  if (!t) return null;
+  if (t.dataUrl) {
+    const m = String(t.dataUrl).match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+    if (!m) throw new Error('thumbnail must be a JPG, PNG or WebP');
+    const bin = atob(m[2]); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (bytes.length > 15 * 1024 * 1024) throw new Error('thumbnail is over 15 MB');
+    return { bytes, type: m[1] };
+  }
+  if (t.youtube) {                                   // YouTube's own thumbnail, only from YouTube's image host
+    const u = new URL(t.youtube);
+    if (!/^(i\d?\.ytimg\.com|img\.youtube\.com)$/.test(u.hostname)) throw new Error('thumbnail URL is not a YouTube image');
+    const r = await fetch(u.toString());
+    if (!r.ok) throw new Error('could not fetch the YouTube thumbnail (' + r.status + ')');
+    return { bytes: new Uint8Array(await r.arrayBuffer()), type: r.headers.get('Content-Type') || 'image/jpeg' };
+  }
+  return null;
+}
+
+async function uploadPoster(env, assetId, t) {
+  const img = await thumbBytes(t);
+  if (!img) return null;
+  const ext = img.type.split('/')[1].replace('jpeg', 'jpg');
+  const kf = await ik(env, `/files/v1/assets/${assetId}/custom_keyframe/?content_type=${encodeURIComponent(img.type)}`, { method: 'POST' });
+  if (!kf.upload_url) throw new Error('Iconik gave no upload URL for the poster: ' + JSON.stringify(kf).slice(0, 200));
+  const headers = { 'Content-Type': img.type, ...(kf.upload_headers || {}) };
+  let up = await fetch(kf.upload_url, { method: 'PUT', headers, body: img.bytes });
+  if (!up.ok && /gcs/i.test(kf.upload_method || '')) {          // GCS resumable URL: start a session, then PUT
+    const init = await fetch(kf.upload_url, { method: 'POST', headers: { ...headers, 'x-goog-resumable': 'start' } });
+    const loc = init.headers.get('Location');
+    if (loc) up = await fetch(loc, { method: 'PUT', headers: { 'Content-Type': img.type }, body: img.bytes });
+  }
+  if (!up.ok) throw new Error(`poster upload ${up.status} (${kf.upload_method || 'PUT'}): ${(await up.text()).slice(0, 200)}`);
+  try {
+    await ik(env, `/files/v1/assets/${assetId}/keyframes/${kf.id}/`, { method: 'PATCH',
+      body: JSON.stringify({ type: 'POSTER', status: 'CLOSED', size: img.bytes.length, filename: `poster.${ext}` }) });
+  } catch {}
+  await ik(env, `/files/v1/assets/${assetId}/custom_keyframe/${kf.id}/`, { method: 'POST' });
+  return { id: kf.id, bytes: img.bytes.length };
+}
+
 async function iconikCheck(env) {
   if (!env.ICONIK_APP_ID || !env.ICONIK_AUTH_TOKEN) return { ready: false, why: 'ICONIK_APP_ID / ICONIK_AUTH_TOKEN are not set on the worker yet.' };
   const view = await getView(env);
   const m = mapFields(view);
   return { ready: true, view: { id: view.id, name: view.name }, needsKey: !!env.PUSH_KEY,
-    fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])) };
+    fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])),
+    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type })) };
 }
 
 async function iconikPush(env, body) {
@@ -229,15 +278,25 @@ async function iconikPush(env, body) {
   const asset = await ik(env, `/assets/v1/assets/${assetId}/`);
   const view = await getView(env);
   const m = mapFields(view);
+  // Poster first, so "Thumbnails Uploaded?" is only switched on when it really landed.
+  let poster = null, posterError = null;
+  if (body.thumbnail && !body.dryRun) { try { poster = await uploadPoster(env, assetId, body.thumbnail); } catch (e) { posterError = String(e && e.message || e); } }
   const metadata_values = {}, written = [], skipped = [];
   for (const [k, f] of Object.entries(m)) {
+    if (TOGGLES.has(k)) continue;
     if (!f) { skipped.push({ field: FIELD_LABELS[k], why: 'not in the Iconik view' }); continue; }
     const fv = toFieldValues(f, k, (body.values || {})[k], body);
     if (fv.skip) { if (fv.skip !== 'empty') skipped.push({ field: f.label, why: fv.skip }); continue; }
     metadata_values[f.name] = fv; written.push(f.label);
   }
+  // "All Metadata Updated?" goes on when every field Iconik requires was written; "Thumbnails Uploaded?" when the poster landed.
+  const missingReq = (view.view_fields || []).filter((f) => f.required && Object.values(m).includes(f) && !metadata_values[f.name]).map((f) => f.label);
+  const toggles = {};
+  if (m.metaDone) { toggles.metaDone = !skipped.length && !missingReq.length; if (toggles.metaDone) { metadata_values[m.metaDone.name] = { field_values: [{ value: true }] }; written.push(m.metaDone.label); } }
+  if (m.thumbDone && poster) { metadata_values[m.thumbDone.name] = { field_values: [{ value: true }] }; written.push(m.thumbDone.label); }
   if (!body.dryRun) await ik(env, `/metadata/v1/assets/${assetId}/views/${view.id}/`, { method: 'PUT', body: JSON.stringify({ metadata_values }) });
-  return [{ ok: true, dryRun: !!body.dryRun, asset: { id: assetId, title: asset.title, url: `https://app.iconik.io/asset/${assetId}` }, written, skipped, ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
+  return [{ ok: true, dryRun: !!body.dryRun, asset: { id: assetId, title: asset.title, url: `https://app.iconik.io/asset/${assetId}` }, written, skipped,
+    missingRequired: missingReq, poster: poster ? 'uploaded' : posterError ? 'failed: ' + posterError : 'not sent', ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
 }
 
 export default {

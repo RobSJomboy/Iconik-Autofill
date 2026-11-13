@@ -95,6 +95,13 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
 .picks button{text-align:left;font-weight:500}
 .picks small{display:block;color:var(--dim);font:12px/1.3 var(--mono)}
 .status a{color:var(--gold)}
+.thumb{display:flex;align-items:center;gap:8px}
+.thumb .tile{position:relative;width:112px;aspect-ratio:16/9;border:1px dashed var(--rule);border-radius:5px;background:var(--well) center/cover no-repeat;display:grid;place-items:center;font-size:11px;color:var(--dim);text-align:center;cursor:pointer;overflow:hidden}
+.thumb .tile.has{border-style:solid}
+.thumb .tile.drag{border-color:var(--gold);outline:2px solid var(--gold)}
+.thumb .tile .tag{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.65);color:#fff;font:10px/1.5 var(--mono);padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thumb .acts{display:flex;flex-direction:column;gap:4px}
+.thumb .acts button{background:none;border:1px solid var(--rule);border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;color:inherit}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -116,6 +123,11 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
     <button class="btn go" id="go" type="submit">Generate</button>
   </form>
   <div class="push" id="pushBar">
+    <div class="thumb">
+      <div class="tile" id="thumbTile" role="button" tabindex="0" aria-label="Thumbnail for the Iconik poster. Click or drop an image to change it.">Thumbnail<br>drop or click</div>
+      <div class="acts"><button type="button" id="thumbPick">Upload</button><button type="button" id="thumbClear" hidden>No poster</button></div>
+      <input type="file" id="thumbFile" accept="image/jpeg,image/png,image/webp" hidden>
+    </div>
     <span class="label">Iconik asset</span>
     <input id="asset" type="text" autocomplete="off" spellcheck="false" placeholder="Optional: paste the Iconik asset link. Blank = find it by title" aria-label="Iconik asset link">
     <button class="btn go" id="push" type="button" disabled>Push to Iconik</button>
@@ -339,6 +351,7 @@ async function generate(){
     $('#go').disabled = false; return;
   }
   state.video = v; state.showAllTags = false;
+  state.thumb = v.thumbnail ? {kind:'youtube', url:v.thumbnail} : null; renderThumb();
   const {g, s} = ruleGuesses(v);
   state.values = {
     title: v.title, published: fmtPublished(v.publishDate), link: `https://www.youtube.com/watch?v=${id}`,
@@ -505,7 +518,8 @@ async function pushToIconik(assetOverride){
   if (!state.video) return;
   const btn = $('#push'); btn.disabled = true; $('#picks').innerHTML = '';
   setStatus('Pushing to Iconik…');
-  const body = { asset: assetOverride || $('#asset').value.trim() || null, videoId: state.video.id, title: state.values.title || state.video.title,
+  const t = state.thumb, thumbnail = !t ? null : t.kind === 'file' ? {dataUrl:t.dataUrl} : {youtube:t.url};
+  const body = { asset: assetOverride || $('#asset').value.trim() || null, videoId: state.video.id, title: state.values.title || state.video.title, thumbnail,
     values: state.values, publishedIso: state.video.publishDate };
   try{
     const r = await fetch(`${YT_API}/iconik/push`, {method:'POST', headers:{'Content-Type':'application/json', 'X-Push-Key': getKey()}, body: JSON.stringify(body)});
@@ -524,12 +538,42 @@ async function pushToIconik(assetOverride){
     }
     $('#asset').value = a.asset.url;
     const skipped = a.skipped.length ? ` Skipped: ${a.skipped.map(x => esc(x.field)+' ('+esc(x.why)+')').join('; ')}.` : '';
-    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${skipped}`, !!a.skipped.length);
+    const posterMsg = a.poster === 'uploaded' ? ' Poster uploaded.' : /^failed/.test(a.poster||'') ? ` Poster didn’t upload (${esc(a.poster.slice(8))}).` : '';
+    const req = (a.missingRequired||[]).length ? ` Still empty in Iconik: ${a.missingRequired.map(esc).join(', ')}, so All Metadata Updated stays off.` : '';
+    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${posterMsg}${skipped}${req}`, !!a.skipped.length || /^failed/.test(a.poster||'') || !!req);
   }catch(e){
     setStatus('Iconik push failed: ' + e.message, true);
   }finally{ syncPushBtn(); }
 }
 $('#push').addEventListener('click', () => pushToIconik());
+
+// Thumbnail → Iconik poster. Defaults to the YouTube thumbnail; drop, paste or pick a file to use your own.
+function renderThumb(){
+  const tile = $('#thumbTile'), t = state.thumb;
+  const src = t ? (t.kind === 'file' ? t.dataUrl : t.url) : '';
+  tile.style.backgroundImage = src ? `url("${src}")` : '';
+  tile.classList.toggle('has', !!src);
+  tile.innerHTML = src ? `<span class="tag">${t.kind === 'file' ? esc(t.name) : 'From YouTube'}</span>` : 'No poster<br>drop or click';
+  $('#thumbClear').hidden = !t;
+  $('#thumbPick').textContent = t && t.kind === 'file' ? 'Change' : 'Upload';
+}
+function takeFile(f){
+  if (!f || !/^image\/(jpeg|png|webp)$/.test(f.type)){ setStatus('Thumbnail has to be a JPG, PNG or WebP.', true); return; }
+  if (f.size > 10*1024*1024){ setStatus('That image is over 10 MB. Export a smaller JPG.', true); return; }
+  const r = new FileReader();
+  r.onload = () => { state.thumb = {kind:'file', dataUrl:r.result, name:f.name}; renderThumb(); };
+  r.readAsDataURL(f);
+}
+$('#thumbPick').addEventListener('click', () => $('#thumbFile').click());
+$('#thumbTile').addEventListener('click', () => $('#thumbFile').click());
+$('#thumbTile').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('#thumbFile').click(); } });
+$('#thumbFile').addEventListener('change', e => { takeFile(e.target.files[0]); e.target.value = ''; });
+$('#thumbClear').addEventListener('click', () => { state.thumb = null; renderThumb(); });
+['dragenter','dragover'].forEach(ev => $('#thumbTile').addEventListener(ev, e => { e.preventDefault(); $('#thumbTile').classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => $('#thumbTile').addEventListener(ev, e => { e.preventDefault(); $('#thumbTile').classList.remove('drag'); }));
+$('#thumbTile').addEventListener('drop', e => takeFile(e.dataTransfer.files[0]));
+document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files||[])].find(x => x.type.startsWith('image/')); if (f && e.target.id !== 'url') takeFile(f); });
+renderThumb();
 $('#picks').addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) pushToIconik(b.dataset.asset); });
 
 renderFields();
