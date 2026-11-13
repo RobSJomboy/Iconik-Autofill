@@ -244,6 +244,9 @@ async function uploadPoster(env, assetId, t) {
   const ext = img.type.split('/')[1].replace('jpeg', 'jpg');
   const kf = await ik(env, `/files/v1/assets/${assetId}/custom_keyframe/?content_type=${encodeURIComponent(img.type)}`, { method: 'POST' });
   if (!kf.upload_url) throw new Error('Iconik gave no upload URL for the poster: ' + JSON.stringify(kf).slice(0, 200));
+  const log = (step, x) => console.log(JSON.stringify({ poster: step, asset: assetId, ...x }));
+  log('created', { id: kf.id, type: kf.type, status: kf.status, method: kf.upload_method, host: (() => { try { return new URL(kf.upload_url).host; } catch { return null; } })(),
+    filename: kf.filename, headerKeys: Object.keys(kf.upload_headers || {}), credKeys: Object.keys(kf.upload_credentials || {}), bytes: img.bytes.length, ct: img.type });
   const headers = { 'Content-Type': img.type, ...(kf.upload_headers || {}) };
   let up = await fetch(kf.upload_url, { method: 'PUT', headers, body: img.bytes });
   if (!up.ok && /gcs/i.test(kf.upload_method || '')) {          // GCS resumable URL: start a session, then PUT
@@ -251,12 +254,19 @@ async function uploadPoster(env, assetId, t) {
     const loc = init.headers.get('Location');
     if (loc) up = await fetch(loc, { method: 'PUT', headers: { 'Content-Type': img.type }, body: img.bytes });
   }
+  log('uploaded', { status: up.status });
   if (!up.ok) throw new Error(`poster upload ${up.status} (${kf.upload_method || 'PUT'}): ${(await up.text()).slice(0, 200)}`);
   try {
-    await ik(env, `/files/v1/assets/${assetId}/keyframes/${kf.id}/`, { method: 'PATCH',
-      body: JSON.stringify({ type: 'POSTER', status: 'CLOSED', size: img.bytes.length, filename: `poster.${ext}` }) });
-  } catch {}
-  await ik(env, `/files/v1/assets/${assetId}/custom_keyframe/${kf.id}/`, { method: 'POST' });
+    const p = await ik(env, `/files/v1/assets/${assetId}/keyframes/${kf.id}/`, { method: 'PATCH',
+      body: JSON.stringify({ type: 'POSTER', status: 'CLOSED', size: img.bytes.length }) });   // keep Iconik's own filename: renaming it points the poster at a file that isn't there
+    log('closed', { status: p.status, url: !!p.url });
+  } catch (e) { log('close-failed', { error: String(e.message).slice(0, 300) }); }
+  const set = await ik(env, `/files/v1/assets/${assetId}/custom_keyframe/${kf.id}/`, { method: 'POST' });
+  log('set', { id: set.id, type: set.type, status: set.status, custom: set.is_custom_keyframe });
+  try {
+    const all = await ik(env, `/files/v1/assets/${assetId}/keyframes/`);
+    log('after', { keyframes: (all.objects || []).map((k) => ({ id: k.id.slice(0, 8), type: k.type, status: k.status, custom: k.is_custom_keyframe, created: k.date_created })) });
+  } catch (e) { log('list-failed', { error: String(e.message).slice(0, 200) }); }
   return { id: kf.id, bytes: img.bytes.length };
 }
 
