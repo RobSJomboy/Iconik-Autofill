@@ -4,11 +4,14 @@
  *   GET  /v/<videoId>  → { id, title, channel, publishDate, lengthSeconds, keywords, description, thumbnail, live, short }
  *   POST /suggest      { video, lists } → { oneSentence, sport, sponsor: [..], mlbFootage }
  *                      (Workers AI; it may only answer with values that exist in `lists`)
+ *   GET  /iconik/check → is the Iconik token set, which view it found, how each page field maps to it
+ *   POST /iconik/push  { asset?, videoId, title, values, publishedIso, dryRun? } → writes the metadata view on one asset
+ *                      (no asset → searches Iconik by title; one hit is written, several come back as `pick`)
  *
  * Browsers can't read YouTube's data directly (CORS), so this asks YouTube's player endpoint
  * on the page's behalf. No API key needed. Falls back to scraping the watch page.
  */
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Push-Key' };
 const json = (b, s = 200) => new Response(JSON.stringify(b), {
   status: s, headers: { 'Content-Type': 'application/json', 'Cache-Control': s === 200 ? 'public, max-age=300' : 'no-store', ...CORS } });
 
@@ -112,10 +115,148 @@ Answer with JSON only, using these keys. Every dropdown answer MUST be copied ex
   };
 }
 
+// ───────────────────────── Iconik ─────────────────────────
+// Secrets (set with `npx wrangler secret put ...`, never in code): ICONIK_APP_ID, ICONIK_AUTH_TOKEN.
+// Optional: ICONIK_VIEW_ID (else the view named ICONIK_VIEW_NAME, default "Jomboy Metadata"),
+//           PUSH_KEY (if set, the page must send it; people enter it once per browser).
+const ICONIK = 'https://app.iconik.io/API';
+const PAGE_ORIGINS = ['https://robsjomboy.github.io'];
+
+// Page field key → the label it has in Iconik's metadata panel. Matching is by label, so the worker
+// finds the real field names and dropdown values itself.
+const FIELD_LABELS = {
+  title: 'Title', published: 'Date & Time Published', link: 'YouTube Link', episodeId: 'Episode ID',
+  sponsor: 'Sponsor', mlbFootage: 'MLB Footage?', topTags: 'Top Tags', oneSentence: 'One Sentence Description',
+  episodeNum: 'Episode #', videoType: 'Video Type', sport: 'Sport & League', contentTag: 'Content Tag',
+};
+const sq = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+async function ik(env, path, init = {}) {
+  const r = await fetch(ICONIK + path, { ...init, headers: {
+    'App-ID': env.ICONIK_APP_ID, 'Auth-Token': env.ICONIK_AUTH_TOKEN, 'Content-Type': 'application/json', Accept: 'application/json', ...(init.headers || {}) } });
+  const text = await r.text();
+  let body; try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 300) }; }
+  if (!r.ok) { const e = new Error(`Iconik ${init.method || 'GET'} ${path.split('?')[0]} → ${r.status}: ${JSON.stringify(body.errors || body).slice(0, 300)}`); e.status = r.status; throw e; }
+  return body;
+}
+
+let viewCache = null;
+async function getView(env) {
+  if (viewCache && Date.now() - viewCache.at < 10 * 60 * 1000) return viewCache.view;
+  let id = env.ICONIK_VIEW_ID;
+  if (!id) {
+    const want = sq(env.ICONIK_VIEW_NAME || 'Jomboy Metadata');
+    const list = await ik(env, '/metadata/v1/views/?per_page=500');
+    const v = (list.objects || []).find((x) => sq(x.name) === want);
+    if (!v) throw new Error(`No metadata view named "${env.ICONIK_VIEW_NAME || 'Jomboy Metadata'}". Views this token can see: ${(list.objects || []).map((x) => x.name).join(', ')}`);
+    id = v.id;
+  }
+  const view = await ik(env, `/metadata/v1/views/${id}/`);
+  viewCache = { at: Date.now(), view };
+  return view;
+}
+
+function mapFields(view) {
+  const vf = view.view_fields || [];
+  const out = {};
+  for (const [k, label] of Object.entries(FIELD_LABELS)) {
+    out[k] = vf.find((f) => sq(f.label) === sq(label)) || vf.find((f) => sq(f.name) === sq(label)) || null;
+  }
+  return out;
+}
+
+// One page value → Iconik field_values, or a reason it was skipped.
+function toFieldValues(f, k, val, body) {
+  let vals = Array.isArray(val) ? val : [val];
+  vals = vals.map((v) => (typeof v === 'string' ? v.trim() : v)).filter((v) => v !== '' && v != null);
+  if (k === 'published') vals = body.publishedIso ? [new Date(body.publishedIso).toISOString()] : [];
+  if (!vals.length) return { skip: 'empty' };
+  const type = String(f.field_type || '').toLowerCase();
+  const opts = f.options || [];
+  if (opts.length) {
+    const bad = [], picked = [];
+    for (const v of vals) {
+      const o = opts.find((x) => sq(x.label) === sq(v) || sq(x.value) === sq(v));
+      o ? picked.push(o.value) : bad.push(v);
+    }
+    if (bad.length) return { skip: `not an option in Iconik: ${bad.join(', ')}` };
+    vals = picked;
+  } else if (type === 'integer') {
+    vals = vals.map((v) => parseInt(v, 10)).filter((n) => !isNaN(n));
+    if (!vals.length) return { skip: 'not a number' };
+  } else if (type === 'float') {
+    vals = vals.map(Number).filter((n) => !isNaN(n));
+  } else if (type === 'boolean') {
+    vals = vals.map((v) => /^(yes|true|1)$/i.test(String(v)));
+  }
+  if (f.multi === false && vals.length > 1) vals = vals.slice(0, 1);
+  return { field_values: vals.map((value) => ({ value })) };
+}
+
+// Accepts an asset UUID or any Iconik link containing /asset/<uuid>.
+const assetIdFrom = (s) => (String(s || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i) || [])[0] || null;
+
+async function findAssets(env, body) {
+  const seen = new Map();
+  const run = async (query) => {
+    try {
+      const r = await ik(env, '/search/v1/search/?per_page=8&generate_signed_url=false', { method: 'POST',
+        body: JSON.stringify({ doc_types: ['assets'], query, sort: [{ name: 'date_created', order: 'desc' }] }) });
+      for (const o of r.objects || []) if (!seen.has(o.id)) seen.set(o.id, { id: o.id, title: o.title, created: o.date_created });
+    } catch (e) { if (e.status === 401 || e.status === 403) throw e; }
+  };
+  if (body.videoId) await run(`"${body.videoId}"`);          // already linked to this YouTube video
+  if (!seen.size && body.title) await run(`"${String(body.title).replace(/"/g, '')}"`);
+  return [...seen.values()];
+}
+
+async function iconikCheck(env) {
+  if (!env.ICONIK_APP_ID || !env.ICONIK_AUTH_TOKEN) return { ready: false, why: 'ICONIK_APP_ID / ICONIK_AUTH_TOKEN are not set on the worker yet.' };
+  const view = await getView(env);
+  const m = mapFields(view);
+  return { ready: true, view: { id: view.id, name: view.name }, needsKey: !!env.PUSH_KEY,
+    fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])) };
+}
+
+async function iconikPush(env, body) {
+  if (!env.ICONIK_APP_ID || !env.ICONIK_AUTH_TOKEN) return [{ error: 'Iconik isn’t connected yet: the worker needs ICONIK_APP_ID and ICONIK_AUTH_TOKEN.' }, 503];
+  let assetId = assetIdFrom(body.asset);
+  if (!assetId) {
+    const hits = await findAssets(env, body);
+    if (hits.length !== 1) return [{ pick: hits, why: hits.length ? 'More than one Iconik asset matches. Pick the right one.' : 'No Iconik asset matches this title. Paste the Iconik asset link.' }, 200];
+    assetId = hits[0].id;
+  }
+  const asset = await ik(env, `/assets/v1/assets/${assetId}/`);
+  const view = await getView(env);
+  const m = mapFields(view);
+  const metadata_values = {}, written = [], skipped = [];
+  for (const [k, f] of Object.entries(m)) {
+    if (!f) { skipped.push({ field: FIELD_LABELS[k], why: 'not in the Iconik view' }); continue; }
+    const fv = toFieldValues(f, k, (body.values || {})[k], body);
+    if (fv.skip) { if (fv.skip !== 'empty') skipped.push({ field: f.label, why: fv.skip }); continue; }
+    metadata_values[f.name] = fv; written.push(f.label);
+  }
+  if (!body.dryRun) await ik(env, `/metadata/v1/assets/${assetId}/views/${view.id}/`, { method: 'PUT', body: JSON.stringify({ metadata_values }) });
+  return [{ ok: true, dryRun: !!body.dryRun, asset: { id: assetId, title: asset.title, url: `https://app.iconik.io/asset/${assetId}` }, written, skipped, ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/iconik/')) {
+      const origin = request.headers.get('Origin');
+      if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
+      try {
+        if (url.pathname === '/iconik/check') { const r = json(await iconikCheck(env)); r.headers.set('Cache-Control', 'no-store'); return r; }
+        if (url.pathname === '/iconik/push' && request.method === 'POST') {
+          if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
+          const [b, st] = await iconikPush(env, await request.json());
+          const r = json(b, st); r.headers.set('Cache-Control', 'no-store'); return r;
+        }
+      } catch (e) { return json({ error: String(e && e.message || e) }, 502); }
+      return json({ error: 'Unknown Iconik route' }, 404);
+    }
     if (url.pathname === '/suggest' && request.method === 'POST') {
       try { return json(await suggest(env, await request.json())); }
       catch (e) { return json({ error: 'AI suggestion failed: ' + (e && e.message || e) }, 502); }

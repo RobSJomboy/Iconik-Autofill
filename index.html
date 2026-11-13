@@ -88,6 +88,13 @@ dialog .body{padding:16px;display:grid;grid-template-columns:repeat(auto-fit,min
 dialog textarea{width:100%;min-height:150px;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:8px;font:13px/1.45 var(--mono)}
 dialog footer{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--rule)}
 .note{font-size:13px;color:var(--dim)}
+.push{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:10px 12px}
+.push input{flex:1 1 280px;min-width:0;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:9px 10px;font:13px/1.3 var(--mono)}
+.push .btn.go{font-size:19px;padding:11px 20px}
+.picks{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.picks button{text-align:left;font-weight:500}
+.picks small{display:block;color:var(--dim);font:12px/1.3 var(--mono)}
+.status a{color:var(--gold)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -96,7 +103,7 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
   <div class="plate">
     <div>
       <h1>Iconik <span>Autofill</span></h1>
-      <p>Paste the YouTube link. Every field comes back in the same order as the Iconik metadata panel, ready to copy across.</p>
+      <p>Paste the YouTube link, check the picks, hit Push to Iconik. Every field lands in the Iconik metadata panel.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" id="editLists" type="button">Dropdown lists</button>
@@ -108,7 +115,13 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
       placeholder="https://www.youtube.com/watch?v=…  or youtu.be/…  or a Shorts link" aria-label="YouTube link">
     <button class="btn go" id="go" type="submit">Generate</button>
   </form>
+  <div class="push" id="pushBar">
+    <span class="label">Iconik asset</span>
+    <input id="asset" type="text" autocomplete="off" spellcheck="false" placeholder="Optional: paste the Iconik asset link. Blank = find it by title" aria-label="Iconik asset link">
+    <button class="btn go" id="push" type="button" disabled>Push to Iconik</button>
+  </div>
   <div class="status" id="status" role="status"></div>
+  <div class="picks" id="picks"></div>
 
   <div class="grid">
     <section class="panel" aria-labelledby="mdTitle">
@@ -127,7 +140,7 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
           <li>Paste the published YouTube link and hit Generate.</li>
           <li>Title, date, link, episode ID and episode # come straight from YouTube.</li>
           <li>Sponsor is matched against the description. Tags, type and the one-sentence description are AI picks, so give them a look.</li>
-          <li>Hit Copy on each field and paste it into Iconik. Fix anything here first and the copy follows.</li>
+          <li>Hit Push to Iconik. It finds the asset by title (or paste its Iconik link) and fills every field. Copy buttons still work if you'd rather paste by hand.</li>
         </ol>
       </div>
     </section>
@@ -332,7 +345,7 @@ async function generate(){
     episodeId: id, episodeNum: episodeNumber(v.title), ...g,
   };
   state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ...s};
-  renderFields(); renderSource();
+  $('#asset').value = ''; renderFields(); renderSource(); syncPushBtn(); $('#picks').innerHTML = '';
   setStatus('YouTube fields are in. Asking AI for the description and tags…');
 
   try{
@@ -349,11 +362,11 @@ async function generate(){
     };
     ['oneSentence','sport','sponsor','mlbFootage'].forEach(k => apply(k, a[k]));
     renderFields();
-    setStatus('Done. Blue labels are AI picks, orange are guesses. Give those a look, then copy across.');
+    setStatus('Done. Blue labels are AI picks, orange are guesses. Give those a look, then hit Push to Iconik.');
   }catch(e){
     setStatus('YouTube fields are ready. The AI picks didn’t come back (' + e.message + '), so the description and tags need filling by hand.', true);
   }
-  $('#go').disabled = false;
+  $('#go').disabled = false; syncPushBtn();
 }
 
 function valueText(k){
@@ -479,6 +492,45 @@ $('#saveLists').addEventListener('click', async () => {
     setStatus('Dropdown lists saved for everyone.');
   }catch(e){ $('#listsNote').textContent = 'Couldn’t save (' + e.message + '). Check your connection and try again.'; }
 });
+
+// ── Push straight into Iconik (the worker holds the Iconik token; this page never sees it) ──
+const KEY_STORE = 'iconikPushKey';
+const getKey = () => { try{ return localStorage.getItem(KEY_STORE) || ''; }catch{ return ''; } };
+const setKey = (k) => { try{ k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); }catch{} };
+
+function setStatusHTML(html, err=false){ const s=$('#status'); s.innerHTML=html; s.className='status'+(err?' err':''); }
+function syncPushBtn(){ $('#push').disabled = !state.video || $('#go').disabled; }   // wait for the AI picks
+
+async function pushToIconik(assetOverride){
+  if (!state.video) return;
+  const btn = $('#push'); btn.disabled = true; $('#picks').innerHTML = '';
+  setStatus('Pushing to Iconik…');
+  const body = { asset: assetOverride || $('#asset').value.trim() || null, videoId: state.video.id, title: state.values.title || state.video.title,
+    values: state.values, publishedIso: state.video.publishDate };
+  try{
+    const r = await fetch(`${YT_API}/iconik/push`, {method:'POST', headers:{'Content-Type':'application/json', 'X-Push-Key': getKey()}, body: JSON.stringify(body)});
+    const a = await r.json();
+    if (a.needsKey){
+      const k = prompt('Enter the Iconik push key (ask Rob). This browser remembers it.');
+      if (k){ setKey(k.trim()); btn.disabled = false; return pushToIconik(assetOverride); }
+      throw new Error('push key needed');
+    }
+    if (!r.ok || a.error) throw new Error(a.error || ('HTTP '+r.status));
+    if (a.pick){
+      setStatus(a.why, !a.pick.length);
+      $('#picks').innerHTML = a.pick.map(p => `<button class="btn" type="button" data-asset="${esc(p.id)}">${esc(p.title)}<small>Created ${esc(p.created ? new Date(p.created).toLocaleString('en-US',{timeZone:'America/New_York'}) : '')} · ${esc(p.id)}</small></button>`).join('');
+      if (!a.pick.length) $('#asset').focus();
+      return;
+    }
+    $('#asset').value = a.asset.url;
+    const skipped = a.skipped.length ? ` Skipped: ${a.skipped.map(x => esc(x.field)+' ('+esc(x.why)+')').join('; ')}.` : '';
+    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${skipped}`, !!a.skipped.length);
+  }catch(e){
+    setStatus('Iconik push failed: ' + e.message, true);
+  }finally{ syncPushBtn(); }
+}
+$('#push').addEventListener('click', () => pushToIconik());
+$('#picks').addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) pushToIconik(b.dataset.asset); });
 
 renderFields();
 loadLists();
