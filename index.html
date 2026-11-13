@@ -56,6 +56,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 .field{display:grid;grid-template-columns:150px minmax(0,1fr) auto;gap:6px 12px;align-items:start;padding:11px 16px;border-bottom:1px solid var(--rule)}
 .field:last-child{border-bottom:0}
+.sep{display:flex;align-items:center;gap:12px;padding:16px 16px 6px;font:500 11px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.sep::before,.sep::after{content:"";flex:1;border-top:1px solid var(--rule)}
+.socialPaste{padding:4px 16px 10px;border-bottom:1px solid var(--rule)}
+.socialPaste textarea{width:100%;min-height:0;background:var(--well);border:1px dashed var(--rule);border-radius:5px;padding:8px 10px;font:12.5px/1.4 var(--mono);resize:vertical}
+.socialPaste textarea:focus{border-style:solid;border-color:var(--gold);outline:none}
 @media (max-width:520px){.field{grid-template-columns:minmax(0,1fr) auto}.field .name{grid-column:1/-1}}
 .name{font-weight:600;font-size:13px;padding-top:7px}
 .name .req{color:var(--gold)}
@@ -206,7 +211,24 @@ const FIELDS = [
   {k:'videoType',  name:'Video Type', req:true, list:'videoType'},
   {k:'sport',      name:'Sport & League', list:'sport'},
   {k:'contentTag', name:'Content Tag', req:true, list:'contentTag'},
+  {k:'ytShorts',   name:'YouTube Shorts Link', mono:true, social:true},
+  {k:'facebook',   name:'Facebook Link', mono:true, social:true},
+  {k:'instagram',  name:'Instagram Link', mono:true, social:true},
+  {k:'twitter',    name:'Twitter Link', mono:true, social:true},
+  {k:'tiktok',     name:'TikTok Link', mono:true, social:true},
+  {k:'linkedin',   name:'LinkedIn Link', mono:true, social:true},
 ];
+// Which social field a pasted link belongs in, by its site.
+const SOCIAL_SITES = [
+  ['ytShorts',  /(^|\.)youtube\.com$|^youtu\.be$/],
+  ['facebook',  /(^|\.)(facebook|fb)\.com$|^fb\.watch$/],
+  ['instagram', /(^|\.)instagram\.com$|^instagr\.am$/],
+  ['twitter',   /(^|\.)(twitter|x)\.com$/],
+  ['tiktok',    /(^|\.)tiktok\.com$/],
+  ['linkedin',  /(^|\.)linkedin\.com$|^lnkd\.in$/],
+];
+const SOCIAL_HEAD = `<div class="sep"><span>Social Links</span></div>
+  <div class="socialPaste"><textarea id="socialPaste" rows="2" spellcheck="false" placeholder="Paste post links here, any order, all at once. They sort into the right boxes below."></textarea></div>`;
 const SRC_TEXT = {yt:'From YouTube', link:'From the link', ai:'AI pick · check it', guess:'Best guess · check it', you:'Edited', none:''};
 
 let state = {values:{}, src:{}, video:null, showAllTags:false};
@@ -356,8 +378,9 @@ async function generate(){
   state.values = {
     title: v.title, published: fmtPublished(v.publishDate), link: `https://www.youtube.com/watch?v=${id}`,
     episodeId: id, episodeNum: episodeNumber(v.title), ...g,
+    ytShorts: v.short ? `https://youtube.com/shorts/${id}` : '',   // a Short is its own Shorts link
   };
-  state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ...s};
+  state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ytShorts: v.short ? 'link' : 'none', ...s};
   $('#asset').value = ''; renderFields(); renderSource(); syncPushBtn(); $('#picks').innerHTML = '';
   setStatus('YouTube fields are in. Asking AI for the description and tags…');
 
@@ -390,7 +413,7 @@ function valueText(k){
 function renderFields(){
   const box = $('#fields');
   if (!state.video){
-    box.innerHTML = FIELDS.map(f => `<div class="field"><div class="name">${esc(f.name)}${f.req?' <span class="req">*</span>':''}</div><div class="val"><input disabled aria-label="${esc(f.name)}" placeholder="—"></div><span></span></div>`).join('');
+    box.innerHTML = FIELDS.map(f => (f.k === 'ytShorts' ? SOCIAL_HEAD : '') + `<div class="field"><div class="name">${esc(f.name)}${f.req?' <span class="req">*</span>':''}</div><div class="val"><input disabled aria-label="${esc(f.name)}" placeholder="—"></div><span></span></div>`).join('');
     $('#copyAll').disabled = true; return;
   }
   box.innerHTML = FIELDS.map(f => {
@@ -419,7 +442,7 @@ function renderFields(){
     } else {
       ctrl = `<input id="f-${f.k}" data-k="${f.k}" class="${f.mono?'mono':''}" value="${esc(v)}" spellcheck="false">`;
     }
-    return `<div class="field"><label class="name" for="f-${f.k}">${esc(f.name)}${f.req?' <span class="req">*</span>':''}<span class="src ${src}">${SRC_TEXT[src]||''}</span></label>
+    return (f.k === 'ytShorts' ? SOCIAL_HEAD : '') + `<div class="field"><label class="name" for="f-${f.k}">${esc(f.name)}${f.req?' <span class="req">*</span>':''}<span class="src ${src}">${SRC_TEXT[src]||''}</span></label>
       <div class="val">${ctrl}</div><button type="button" class="copy" data-copy="${f.k}">Copy</button></div>`;
   }).join('');
   $('#copyAll').disabled = false;
@@ -573,6 +596,27 @@ $('#thumbClear').addEventListener('click', () => { state.thumb = null; renderThu
 ['dragleave','drop'].forEach(ev => $('#thumbTile').addEventListener(ev, e => { e.preventDefault(); $('#thumbTile').classList.remove('drag'); }));
 $('#thumbTile').addEventListener('drop', e => takeFile(e.dataTransfer.files[0]));
 document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files||[])].find(x => x.type.startsWith('image/')); if (f && e.target.id !== 'url') takeFile(f); });
+
+// Social links: pull every URL out of whatever was pasted and drop each into its platform's box.
+function sortSocialLinks(text){
+  const urls = (text.match(/(?:https?:\/\/|www\.)[^\s<>"')\]]+|\b(?:youtu\.be|fb\.watch|instagr\.am|lnkd\.in|(?:www\.|m\.|vm\.)?(?:youtube|facebook|instagram|twitter|x|tiktok|linkedin)\.com)\/[^\s<>"')\]]+/gi) || []).map(u => u.replace(/[.,;]+$/,''));
+  const placed = [], unknown = [];
+  for (let raw of urls){
+    const u = /^https?:/i.test(raw) ? raw : 'https://' + raw;
+    let host; try{ host = new URL(u).hostname.replace(/^(www|m|mobile|vm)\./,'').toLowerCase(); }catch{ unknown.push(raw); continue; }
+    const hit = SOCIAL_SITES.find(([, re]) => re.test(host));
+    if (!hit){ unknown.push(raw); continue; }
+    state.values[hit[0]] = u; state.src[hit[0]] = 'you'; placed.push(FIELDS.find(f => f.k === hit[0]).name.replace(' Link',''));
+  }
+  return {placed, unknown};
+}
+$('#fields').addEventListener('paste', e => {
+  if (e.target.id !== 'socialPaste') return;
+  e.preventDefault();
+  const {placed, unknown} = sortSocialLinks(e.clipboardData.getData('text'));
+  renderFields();
+  setStatus(placed.length ? `Sorted ${placed.length} link${placed.length>1?'s':''}: ${placed.join(', ')}.` + (unknown.length ? ` Didn’t recognise: ${unknown.join(' ')}` : '') : 'No social links found in that paste.', !placed.length || !!unknown.length);
+});
 renderThumb();
 $('#picks').addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) pushToIconik(b.dataset.asset); });
 

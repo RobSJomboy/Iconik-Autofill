@@ -128,6 +128,8 @@ const FIELD_LABELS = {
   title: 'Title', published: 'Date & Time Published', link: 'YouTube Link', episodeId: 'Episode ID',
   sponsor: 'Sponsor', mlbFootage: 'MLB Footage?', topTags: 'Top Tags', oneSentence: 'One Sentence Description',
   episodeNum: 'Episode #', videoType: 'Video Type', sport: 'Sport & League', contentTag: 'Content Tag',
+  ytShorts: 'YouTube Shorts Link', facebook: 'Facebook Link', instagram: 'Instagram Link', twitter: 'Twitter Link',
+  tiktok: 'TikTok Link', linkedin: 'LinkedIn Link',
   metaDone: 'All Metadata Updated?', thumbDone: 'Thumbnails Uploaded?',
 };
 // Toggles the worker sets itself; the page never sends them.
