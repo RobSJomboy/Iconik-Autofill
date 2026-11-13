@@ -2,7 +2,7 @@
  * Jomboy YouTube lookup — feeds the Iconik metadata helper.
  *
  *   GET  /v/<videoId>  → { id, title, channel, publishDate, lengthSeconds, keywords, description, thumbnail, live, short }
- *   POST /suggest      { video, lists } → { oneSentence, sport, sponsor, mlbFootage }
+ *   POST /suggest      { video, lists } → { oneSentence, sport, sponsor: [..], mlbFootage }
  *                      (Workers AI; it may only answer with values that exist in `lists`)
  *
  * Browsers can't read YouTube's data directly (CORS), so this asks YouTube's player endpoint
@@ -94,7 +94,7 @@ ${trimDescription(v.description || '')}
 Answer with JSON only, using these keys. Every dropdown answer MUST be copied exactly from its list, or "" if none fits.
 - "oneSentence": one complete sentence, 14-30 words, with a subject and a verb, telling a reader what happens in this video, e.g. "The guys react to a blockbuster deadline trade and argue over whether it actually fixes the rotation." (only an example of the style; describe THIS video) Do not just restate the title. Plain and specific, no hype, no hashtags, no host names unless the description names them. Do not start with "In this episode". Never use the word "fans".
 - "sport": one value from [${list('sport')}] — the sport and league the video is about
-- "sponsor": one value from [${list('sponsor')}] — the brand the description runs an ad read for (download this app, use code, visit this site). If the description has no ad, answer the "NOT APPLICABLE" option. A team, league or network just being talked about is not a sponsor.
+- "sponsor": array of every value from [${list('sponsor')}] that the description runs an ad read for (download this app, use code, visit this site, including brand names inside links like bestwestern.com or seatgeek.com). If the description has no ad, answer ["1. NOT APPLICABLE"]. A team, league or network just being talked about is not a sponsor.
 - "mlbFootage": one value from [${list('mlbFootage')}] — only "yes" if the description credits MLB video/footage`;
   const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
     messages: [{ role: 'user', content: prompt }], max_tokens: 400, temperature: 0.2,
@@ -108,7 +108,7 @@ Answer with JSON only, using these keys. Every dropdown answer MUST be copied ex
     const opts = L[k] || []; return opts.find((o) => sq(o) === t) || (t.length >= 6 && opts.find((o) => sq(o).endsWith(t))) || ''; };
   return {
     oneSentence: String(out.oneSentence || '').trim(),
-    sport: pick('sport', out.sport), sponsor: pick('sponsor', out.sponsor), mlbFootage: pick('mlbFootage', out.mlbFootage),
+    sport: pick('sport', out.sport), sponsor: [...new Set((Array.isArray(out.sponsor) ? out.sponsor : [out.sponsor]).map((s) => pick('sponsor', s)).filter(Boolean))], mlbFootage: pick('mlbFootage', out.mlbFootage),
   };
 }
 

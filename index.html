@@ -173,7 +173,7 @@ const FIELDS = [
   {k:'published',  name:'Date & Time Published', req:true, mono:true},
   {k:'link',       name:'YouTube Link', req:true, mono:true},
   {k:'episodeId',  name:'Episode ID', req:true, mono:true},
-  {k:'sponsor',    name:'Sponsor', req:true, list:'sponsor'},
+  {k:'sponsor',    name:'Sponsor', req:true, list:'sponsor', pickMany:true},
   {k:'mlbFootage', name:'MLB Footage?', req:true, list:'mlbFootage'},
   {k:'topTags',    name:'Top Tags', req:true, list:'topTags', multi:true},
   {k:'oneSentence',name:'One Sentence Description', req:true, long:true},
@@ -231,33 +231,43 @@ function sponsorRegex(o){
   if (!parts.length) return null;
   return new RegExp('(^|[^a-z0-9])(' + parts.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join("[^a-z0-9]{0,3}(?:and[^a-z0-9]{1,2})?") + ')(s?)($|[^a-z0-9])', 'i');
 }
-// Finds the sponsor in the episode part of the description. Earliest ad paragraph wins, then the most specific name.
-function findSponsor(desc){
-  const paras = episodeTail(desc).split(/\n\s*\n/).filter(p => AD_CUE.test(p));
+// Every sponsor read sits above the Lifesong / Terry Cashman credit, right under the Fanatics line.
+const SPONSOR_END = /Willie, Mickey & .?The Duke|available to purchase on Lifesong Records/i;
+// Our own plugs (Warehouse Games, merch, show notes) aren't sponsors.
+const OWN_PROMO = /youtube\.com\/@|jomboymedia\.com|^\s*watch\b.*\bnow\b/i;
+function sponsorZone(desc){
+  desc = desc.split('\n').filter(l => !OWN_PROMO.test(l)).join('\n');
+  const cut = desc.search(SPONSOR_END);
+  if (cut > 0) return [desc.slice(0, cut)];                                  // the whole block is sponsor reads
+  return episodeTail(desc).split(/\n\s*\n/).filter(p => AD_CUE.test(p));      // no credit line: only ad-looking paragraphs
+}
+// Finds every sponsor in the description, in the order they appear. Links count: bestwestern.com, seatgeek.com/talkin, shopify.com/tb.
+function findSponsors(desc){
   const hits = [];
-  paras.forEach((p, pi) => {
-    const sq = squash(p);
+  sponsorZone(desc).forEach((p, pi) => {
+    const sq = squash(p), low = p.toLowerCase();
     for (const o of LISTS.sponsor){
       if (NONE_RE.test(o)) continue;
       const key = squash(o); if (key.length < 2) continue;
-      let hit = null;
+      let hit = null, at = -1;
       if (GENERIC.has(o.toLowerCase())){
         const name = o.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
         const m = p.match(new RegExp('(?:sponsored by|thanks to|presented by|brought to you by|download|visit)\\s+(?:the\\s+)?()(' + name + ')(?=$|[^A-Za-z0-9])', 'i'))
                || p.match(new RegExp('(@|\\b)(' + key + ')(?:\\.com|\\b(?=\\s+(?:app|code)\\b))', 'i'));
-        if (m) hit = m[2];
+        if (m){ hit = m[2]; at = m.index; }
       } else {
         // "AG1 (Athletic Greens)" matches on either name.
-        for (const alias of o.split(/\s*[()]\s*/).filter(Boolean)){ const re = sponsorRegex(alias), m = re && p.match(re); if (m){ hit = m[2]; break; } }
-        if (hit) {}
-        else if (key.length >= 7 && sq.includes(key)) hit = o;          // "The Farmer's Dog" → farmersdog
-        else { const d = p.match(new RegExp('(?:@|\\b)(' + key + ')(?=\\.com|\\.co\\b)', 'i')); if (d) hit = d[1]; }
+        for (const alias of o.split(/\s*[()]\s*/).filter(Boolean)){ const re = sponsorRegex(alias), m = re && p.match(re); if (m){ hit = m[2]; at = m.index; break; } }
+        if (!hit){ const d = p.match(new RegExp('(?:@|\\b|//|www\\.)(' + key + ')(?=\\.com|\\.co\\b|\\.io\\b|/)', 'i')); if (d){ hit = d[1]; at = d.index; } }
+        if (!hit && key.length >= 7 && sq.includes(key)){ hit = o; at = Math.round(sq.indexOf(key) / Math.max(sq.length,1) * low.length); }   // "The Farmer's Dog" → farmersdog
       }
-      if (hit) hits.push({o, hit, pi, at: p.toLowerCase().indexOf(hit.toLowerCase()), len: key.length});
+      if (hit) hits.push({o, hit, pi, at: at < 0 ? low.indexOf(hit.toLowerCase()) : at, key});
     }
   });
-  hits.sort((a,b) => a.pi-b.pi || b.len-a.len || a.at-b.at);
-  return hits[0] || null;
+  // Drop a name that's only part of a longer match (LinkedIn inside LinkedInTalentSolutions, AthleticGreens inside AG1 (Athletic Greens)).
+  const keep = hits.filter(a => !hits.some(b => b !== a && b.key.length > a.key.length && (b.key.includes(a.key) || squash(b.o.replace(/^.*\(|\).*$/g,'')) === a.key)));
+  keep.sort((a,b) => a.pi-b.pi || a.at-b.at);
+  return keep;
 }
 
 // Fast rule-based pass: shows something useful instantly, before the AI answers.
@@ -266,12 +276,16 @@ function ruleGuesses(v){
   const top = episodeTail(v.description).toLowerCase();
   const hay = (v.title + ' ' + top + ' ' + v.keywords.join(' ')).toLowerCase();
 
-  const sp = findSponsor(v.description);
-  state.sponsorHit = sp ? sp.hit : '';
-  g.sponsor = sp ? sp.o : findOpt('sponsor', NONE_RE); s.sponsor = sp ? 'yt' : 'guess';
+  const sps = findSponsors(v.description);
+  state.sponsorHits = sps.map(x => x.hit);
+  g.sponsor = sps.length ? [...new Set(sps.map(x => x.o))] : [findOpt('sponsor', NONE_RE)].filter(Boolean);
+  // With the Lifesong credit line present the sponsor block is exact, so "none found" really means none.
+  s.sponsor = sps.length || SPONSOR_END.test(v.description) ? 'yt' : 'guess';
 
-  g.mlbFootage = /courtesy of mlb|mlb footage|video courtesy|©\s*mlb/i.test(v.description) ? findOpt('mlbFootage',/^yes$/i) : findOpt('mlbFootage',/^no$/i);
-  s.mlbFootage = 'guess';
+  // Every Talkin' Baseball video uses MLB footage.
+  const isTB = /talkin.?\s*baseball/i.test(v.channel || '');
+  g.mlbFootage = isTB || /courtesy of mlb|mlb footage|video courtesy|©\s*mlb/i.test(v.description) ? findOpt('mlbFootage',/^yes$/i) : findOpt('mlbFootage',/^no$/i);
+  s.mlbFootage = isTB ? 'yt' : 'guess';
 
   // Top Tags is open type-ahead in Iconik; the house default is MLB.
   g.topTags = LISTS.topTags.includes('MLB') ? ['MLB'] : LISTS.topTags.slice(0,1); s.topTags = 'guess';
@@ -326,10 +340,10 @@ async function generate(){
       body: JSON.stringify({video:{title:v.title, channel:v.channel, lengthSeconds:v.lengthSeconds, short:v.short, live:v.live, keywords:v.keywords, description:v.description}, lists:{sponsor:LISTS.sponsor, sport:LISTS.sport, mlbFootage:LISTS.mlbFootage}})});
     const a = await r.json();
     if (!r.ok || a.error) throw new Error(a.error || ('HTTP '+r.status));
-    // AI only fills fields nobody has touched, and never overrides a sponsor found in the description.
+    // AI only fills fields nobody has touched, and never overrides what the description or channel already settled.
     const apply = (k, val) => {
       if (state.src[k] === 'you') return;
-      if (k === 'sponsor' && state.src.sponsor === 'yt') return;
+      if (state.src[k] === 'yt') return;
       if (Array.isArray(val) ? !val.length : !val) return;
       state.values[k] = val; state.src[k] = 'ai';
     };
@@ -357,7 +371,11 @@ function renderFields(){
     const v = state.values[f.k] ?? '';
     const src = state.src[f.k] || 'none';
     let ctrl;
-    if (f.multi){
+    if (f.pickMany){
+      const opts = LISTS[f.list] || [], sel = Array.isArray(v) ? v : (v ? [v] : []);
+      ctrl = `<div class="chips">${sel.map(o=>`<button type="button" class="chip" aria-pressed="true" data-remove="${esc(o)}" data-field="${f.k}" title="Remove ${esc(o)}">${esc(o)} ×</button>`).join('')}</div>
+        <input id="f-${f.k}" data-add="${f.k}" list="dl-${f.k}" placeholder="+ Add a ${esc(f.name.toLowerCase())} (type to search ${opts.length})" spellcheck="false" autocomplete="off" style="margin-top:6px"><datalist id="dl-${f.k}">${opts.filter(o=>!sel.includes(o)).map(o=>`<option value="${esc(o)}">`).join('')}</datalist>`;
+    } else if (f.multi){
       const opts = LISTS[f.list] || [];
       const sel = new Set(v || []);
       const shown = state.showAllTags ? opts : opts.filter(o => sel.has(o));
@@ -386,9 +404,9 @@ function renderSource(){
   if (!v) return;
   el.className = 'source';
   $('#srcId').textContent = v.id;
-  const hit = state.sponsorHit;
   let d = esc(v.description);
-  if (hit) d = d.replace(new RegExp('('+esc(hit).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'), '<mark>$1</mark>');
+  const hits = (state.sponsorHits||[]).filter(Boolean).map(x => esc(x).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+  if (hits.length) d = d.replace(new RegExp('('+hits.join('|')+')','gi'), '<mark>$1</mark>');
   el.innerHTML = `<h3>${esc(v.title)}</h3>
     <div class="meta"><span>${esc(v.channel)}</span><span>${fmtLength(v.lengthSeconds)}</span><span>${esc(fmtPublished(v.publishDate))} ET</span></div>
     <div><div class="label" style="margin-bottom:6px">Description</div><div class="desc">${d || '<em>No description</em>'}</div></div>
@@ -405,7 +423,17 @@ async function copyText(text, btn){
 }
 
 // Edits
+function setPicks(k, list){
+  // Picking a real sponsor clears "NOT APPLICABLE"; removing the last one puts it back.
+  let next = list.filter(Boolean);
+  if (next.some(o => !NONE_RE.test(o))) next = next.filter(o => !NONE_RE.test(o));
+  if (!next.length){ const n = findOpt(k, NONE_RE); if (n) next = [n]; }
+  state.values[k] = [...new Set(next)]; state.src[k] = 'you'; renderFields();
+  const box = $('#f-'+k); if (box) box.focus();
+}
 $('#fields').addEventListener('input', e => {
+  const add = e.target.dataset.add;
+  if (add){ const opt = (LISTS[add]||[]).find(o => o.toLowerCase() === e.target.value.trim().toLowerCase()); if (opt) setPicks(add, [...(state.values[add]||[]), opt]); return; }
   const k = e.target.dataset.k; if (!k) return;
   state.values[k] = e.target.value; state.src[k] = 'you';
   const s = e.target.closest('.field').querySelector('.src'); if (s){ s.className='src you'; s.textContent=SRC_TEXT.you; }
@@ -415,6 +443,7 @@ $('#fields').addEventListener('click', e => {
   if (c){ copyText(valueText(c.dataset.copy), c); return; }
   const chip = e.target.closest('.chip');
   if (!chip) return;
+  if (chip.dataset.remove){ const k = chip.dataset.field; setPicks(k, (state.values[k]||[]).filter(o => o !== chip.dataset.remove)); return; }
   if (chip.dataset.more){ state.showAllTags = !state.showAllTags; renderFields(); return; }
   const cur = new Set(state.values.topTags || []);
   cur.has(chip.dataset.tag) ? cur.delete(chip.dataset.tag) : cur.add(chip.dataset.tag);
