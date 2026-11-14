@@ -65,7 +65,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .name{font-weight:600;font-size:13px;padding-top:7px}
 .name .req{color:var(--gold)}
 .src{display:block;font:500 10px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-top:3px;color:var(--dim)}
-.src.yt{color:var(--ok)} .src.ai{color:var(--ai)} .src.guess{color:var(--warn)} .src.you{color:var(--gold)}
+.src.yt,.src.iconik{color:var(--ok)} .src.ai{color:var(--ai)} .src.guess{color:var(--warn)} .src.you{color:var(--gold)}
 .val input,.val select,.val textarea{width:100%;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:7px 10px;min-width:0}
 .val textarea{resize:vertical;min-height:64px}
 .val .mono{font-family:var(--mono);font-size:13px}
@@ -193,10 +193,11 @@ const DEFAULT_LISTS = {
   videoType: ['Longform','Short','Live'],
   sport: ["Archery - World Archery Para Championship", "Badminton - Indonesia Open", "Badminton - Denmark Open", "Badminton - Hong Kong Badminton Association", "Badminton - Malaysia Masters", "Badminton - Malaysian Open", "Bandy - Men's Bandy Championship", "Baseball - AAPB", "Baseball - Australian Baseball league", "Baseball - Baseball5", "Baseball - Caribbean Series", "Baseball - Dominican League", "Baseball - Dominican Professional Baseball League", "Baseball - Dominican Winter League", "Baseball - Frontier League", "Baseball - High School", "Baseball - Japan Series", "Baseball - Junior League World Series", "Baseball - KBO", "Baseball - Little League World Series", "Baseball - LVBP", "Baseball - Minor League", "Baseball - MLB", "Baseball - MPL", "Baseball - NCAA", "Baseball - Northwoods League Baseball", "Baseball - NPB", "Baseball - Superpesis", "Baseball - Venezuelan Baseball League", "Baseball - WBC", "Baseball - World Cup", "Basketball - Americup", "Basketball - Big 3", "Basketball - CEBL", "Basketball - Euro League", "Basketball - EuroBasket Women", "Basketball - FIBA", "Basketball - FIBA 3x3", "Basketball - High School", "Basketball - LBA", "Basketball - NBA", "Basketball - NBA (Argentina)", "Basketball - NBL", "Basketball - NCAA", "Basketball - Olympics", "Basketball - Philadelphia Catholic Boys League", "Basketball - Sals NBL", "Basketball - Unicycle", "Basketball - WNBA", "Beach Korfball - World Games", "Blitzball - Warehouse", "Bobsled - IBSF", "Bocce - Ohio Bocce League", "Bowling - NCAA", "Bowling - PBA", "Boxing - MVP", "Calcio - Storico Fiorentino", "Cliff Diving - Red Bull", "Cornhole - ACL", "Cricket - Asia Cup", "Cricket - BBL", "Cricket - CPL", "Cricket - European Cricket League", "Cricket - IPL", "Cricket - Legends League", "Cricket - LMS", "Cricket - MLC", "Cricket - MPL", "Cricket - NCL", "Cricket - PSL", "Cricket - T10", "Cricket - T20", "Cricket - The Ashes", "Cricket - The Hundred", "Cricket - Women's Premier League", "Cricket - Women's World Cup", "Cricket - World Cup", "Cricket - World Test Championship", "Cricket - WPL", "Curling - Brier", "Curling - National Curling Championship", "Curling - World Championship", "Cycle-Ball - World Cup", "Cycling - Milano-Sanremo", "Cycling - Tour De Flanders", "Cycling - UAE Tour", "Darts - Bahrain Masters", "Darts - German Open", "Darts - Professional Darts Corporation", "Darts - World Championship", "Darts - World Cup of Darts", "Darts - World Series", "Disc Golf - Disc Golf Pro Tour", "Disc Golf - European Open", "Disc Golf - Ledgestone Open", "Disc Golf - Professional Disc Golf Association", "Disc Golf - Waco Charity Open", "Discflect - PDFA", "Discgolf - Northwest Discgolf Championship", "Diving - Olympics", "Dodgeball - NCAA", "Dodgeball - World Championship", "Field Hockey - FIH", "Field Hockey - NCAA", "Field Hockey - Olympics", "Fighting - Thai Fight League", "Figure Skating", "Fishing - Major League Fishing", "Floorball - WFC", "Football - AFL", "Football - Allianz", "Football - Arena Football", "Football - CFL", "Football - European League", "Football - High School", "Football - IFL", "Football - JUCO", "Football - LGFA", "Football - NCAA", "Football - NFL", "Football - NFL Flag Football Championships", "Football - U Sports League", "Football - UFL", "Football - United Football League", "Football - USFL", "Football - XFL", "Frisbee - NCAA", "Frisbee - UFA", "Futsal", "Futsal - World Cup", "Golf - Latin America Amateur", "Gymnastics - NCAA", "Handball - Danish Women's League", "Handball - EHF", "Handball - IHF", "Handball - Paralympics", "Handball - PHL", "Handball - World Championship", "Hockey - AHL", "Hockey - British Elite League", "Hockey - ECHL", "Hockey - IIHF", "Hockey - KHL", "Hockey - NCAA", "Hockey - NHL", "Hockey - OK Liga", "Hockey - PHF", "Hockey - PWHL", "Hockey - World Juniors", "Hurling - AIB", "Hurling - All-Ireland Intermediate Club Football Championship", "Hurling - GAA", "Hurling - Munster Hurling League", "Hurling - National Hurling League", "Hurling - Waterford Senior Hurling Championship", "Kabaddi - PKL", "Lacross - NLL", "Lacrosse - NCAA", "Lacrosse - PLL", "Lacrosse - WLL", "Lacrosse - Women's World Box Lacrosse Championship", "Long Jump - Paralympics", "Motoball - German", "Padel - Alpine Paris Major", "Padel - FPT", "Padel - Hexagon Cup", "Padel - Premier Padel", "Pickleball - APP", "Pickleball - MLP", "Pickleball - PPA", "Pole Vault - Olympics", "Racing - Championship Off-Road Racing", "Racing - Cyclocross", "Racing - Nascar Regional Series", "Rugby - AFL", "Rugby - Hong Kong 7s", "Rugby - NRL", "Rugby - Premiership", "Rugby - Six Nations Championship", "Rugby - Super Rugby Pacific League", "Rugby - The Rugby Championship", "Rugby - United Rugby Championship", "Rugby - Wheelchair Super League", "Rugby - Women's World Cup", "Rugby - World Cup", "Skateboarding - Tony Hawk: Vert", "Skateboarding - X-Games", "Skiing - Alpine World Cup", "Skiing - X-Games", "Slamball", "Slap Kabaddi", "Snooker - World Championship", "Snowboard - X Games", "Soccer - A League", "Soccer - Africa Cup of Nations", "Soccer - Bahraini Premier League", "Soccer - Belgium Pro League", "Soccer - Brazilian Series", "Soccer - Bundesliga", "Soccer - Campeonato Brasileiro Série A", "Soccer - Canadian Premier League", "Soccer - Champions League", "Soccer - CONCACAF", "Soccer - EE Disability Cup", "Soccer - EFL", "Soccer - Elite Two", "Soccer - Eliteserien", "Soccer - EPL", "Soccer - FIFA Beach Soccer World Cup", "Soccer - Friendlies", "Soccer - Gaelic", "Soccer - I-League", "Soccer - I-League 3", "Soccer - Kings Nation WC", "Soccer - Libyan Football Federation", "Soccer - Liga DIMAYOR", "Soccer - Liga MX", "Soccer - Liga Profesional de Fútbol", "Soccer - MLS", "Soccer - National Independent Soccer Association", "Soccer - NCAA", "Soccer - NFL", "Soccer - NWSL", "Soccer - Paralympics", "Soccer - Premier League", "Soccer - Premier League (Argentina)", "Soccer - Queens League", "Soccer - RSL", "Soccer - Russian Premier League", "Soccer - Southern League", "Soccer - UEFA Women's Championship", "Soccer - USL", "Soccer - USL League Two", "Soccer - V.League 1", "Soccer - World Cup", "Softball - AUSL", "Softball - High School", "Softball - LLSWS", "Softball - Men's World Cup", "Softball - National Open Women’s Championship", "Softball - NCAA", "Softball - Senior League Softball World Series", "Speed Skating - Youth Olympic Games", "Spikeball", "Steeplechase", "Sumo - Grand Sumo Tournament", "Sumo - Japan Sumo Association", "Sumo - World Championships", "Swimming - Paralympics", "Table Tennis - World Table Tennis", "Tennis - ATP", "Tennis - BNP Paribas Open", "Tennis - Dubai Tennis Championship", "Tennis - Monte Carlo Masters", "Tennis - U.S. Open", "Teqball - Teqball Tour", "Track - Diamond League", "Track - European 20k Race Walk Championship", "Track - European U18 Championships", "Track - High School", "Track - NCAA", "Track - Penn Relays Master Division", "Track - World Athletics", "Track - World Championships", "Ultimate Disc - AUDL", "Volleyball - AVP", "Volleyball - Beach Volleyball NCAA", "Volleyball - Beach Volleyball World Championship", "Volleyball - NCAA", "Volleyball - Pan-American", "Volleyball - PVF", "Water Polo - NCAA", "Weightlifting - Strongman Classic", "Wrestling - Beach Wrestling", "Wrestling - Fargo", "Wrestling - Final X", "Wrestling - High School", "Wrestling - NCAA", "Pole Vault - NCAA", "Wrestling - Pan-American Championships"],
   contentTag: ['N/A'],
+  channel: ["15th Floor", "Cherry Pinstripes", "Courtney Hirsch", "Jack & Zo", "Jack Doyle", "Jimmy Socials", "JM Baseball", "JM Football", "JM Gaming", "JoezMcfly", "Jolly Olive", "Jomboy & Jake TV", "Jomboy Media", "Lorenzo DeMalia", "More Jomboy", "Shea Station", "Shelfy", "Slashline", "Swamp Donkey Radio", "Swilly", "Talkin' Baseball", "Talkin' Giants", "Talkin' Yanks", "That's Cricket", "Wake n Jake", "Warehouse Challenges", "Warehouse Games", "We Got Ice", "Yankees Avenue"],
   owningCreator: ["1 - None", "2 - Warehouse", "Adam Bannon", "Chris Rose", "Courtney Hirsch", "Dan Canobbio", "Dan Rourke", "Jack Doyle", "Jimmy Knorp", "Joez McFly", "Jolly Olive", "Jomboy", "Justin Penik", "Kelsey Wingert", "Peter Moylan", "Shelfy", "Swilly", "Talkin' Jake", "Trevor Plouffe", "Zo DeMalia"],
   guestCreator: ["1 - None", "Adam Bannon", "Andrew Biondi", "Ashland", "BBD", "Chris Rose", "Connor Kurpat", "Courtney Hirsch", "Dalton Feely", "Dan Canobbio", "Dan Rourke", "Dre Freeman", "Drew Davis", "Erica Block", "Jack Doyle", "Jack Sorensen", "Jeff DePalma", "Jeremy Shechter", "Jimmy Knorp", "Joez McFly", "Jolly Olive", "Jomboy", "Jon Serrano", "Jordyn Graime", "Justin Penik", "Kelsey Wingert", "Kevin Hargrave", "Kyle Kondor", "Kyle MacDonald", "Liam Plunkett", "Lucas D'Aversa", "Luke O'Brien", "Matty Mass", "Max Mannis", "Max Monson", "Paxton Elrod", "Peter Moylan", "Rob Moretti", "Rob Scirocco", "Robbie Tassaro", "Rony Jerez", "Ryan Cohen", "Ryan Johnson", "Sam Taskey", "Sarah Teper", "Shelfy", "Steve Jeszeck", "Swilly", "Talkin' Jake", "Taylor Jackson", "Tim Stopyra", "Tom Prizeman", "Trevor Plouffe", "Zack Esposito", "Zo DeMalia", "Sam Peters"],
 };
-const LIST_LABELS = {sponsor:'Sponsor',mlbFootage:'MLB Footage?',topTags:'Top Tags',videoType:'Video Type',sport:'Sport & League',owningCreator:'Owning Creator',guestCreator:'Guest Creator',contentTag:'Content Tag'};
+const LIST_LABELS = {sponsor:'Sponsor',mlbFootage:'MLB Footage?',topTags:'Top Tags',videoType:'Video Type',sport:'Sport & League',channel:'Channel',owningCreator:'Owning Creator',guestCreator:'Guest Creator',contentTag:'Content Tag'};
 let LISTS = structuredClone(DEFAULT_LISTS);
 
 // Field order mirrors the Iconik metadata panel.
@@ -209,6 +210,7 @@ const FIELDS = [
   {k:'mlbFootage', name:'MLB Footage?', req:true, list:'mlbFootage'},
   {k:'topTags',    name:'Top Tags', req:true, list:'topTags', multi:true},
   {k:'oneSentence',name:'One Sentence Description', req:true, long:true},
+  {k:'channel',    name:'Channel', list:'channel'},
   {k:'episodeNum', name:'Episode #', mono:true},
   {k:'videoType',  name:'Video Type', req:true, list:'videoType'},
   {k:'sport',      name:'Sport & League', list:'sport'},
@@ -233,7 +235,7 @@ const SOCIAL_SITES = [
 ];
 const SOCIAL_HEAD = `<div class="sep"><span>Social Links</span></div>
   <div class="socialPaste"><textarea id="socialPaste" rows="2" spellcheck="false" placeholder="Paste post links here, any order, all at once. They sort into the right boxes below."></textarea></div>`;
-const SRC_TEXT = {yt:'From YouTube', link:'From the link', ai:'AI pick · check it', guess:'Best guess · check it', you:'Edited', none:''};
+const SRC_TEXT = {iconik:'Channel default · from Iconik', yt:'From YouTube', link:'From the link', ai:'AI pick · check it', guess:'Best guess · check it', you:'Edited', none:''};
 
 let state = {values:{}, src:{}, video:null, showAllTags:false};
 const $ = (s, el=document) => el.querySelector(s);
@@ -321,19 +323,37 @@ function findSponsors(desc){
   return keep;
 }
 
-// Channel → the creators who own it. Only names that exist in the Owning Creator list are kept.
-const CHANNEL_OWNERS = [
-  [/talkin.?\s*baseball/i, ["Talkin' Jake", 'Trevor Plouffe']],
-  [/jack\s*&\s*zo/i, ['Jack Doyle', 'Zo DeMalia']],
-  [/warehouse/i, ['2 - Warehouse']],
-  [/jolly olive/i, ['Jolly Olive']], [/shelfy/i, ['Shelfy']], [/swilly/i, ['Swilly']], [/jack doyle/i, ['Jack Doyle']],
-  [/courtney hirsch/i, ['Courtney Hirsch']], [/joez\s*mc\s*fly/i, ['Joez McFly']], [/lorenzo demalia/i, ['Zo DeMalia']],
-  [/^jomboy media$/i, ['Jomboy']],
-];
-function ownersFor(channel){
-  const hit = CHANNEL_OWNERS.find(([re]) => re.test(channel));
-  return hit ? hit[1].filter(n => LISTS.owningCreator.includes(n)) : [];
+// Each channel's usual Owning Creator, counted from assets already tagged in Iconik (snapshot 2026-11-13).
+// The page re-checks Iconik live on every Generate, so this is only the fallback.
+const CHANNEL_DEFAULTS = {
+  "Courtney Hirsch":['Courtney Hirsch'], "JM Football":['Justin Penik'], "JM Gaming":['Joez McFly'],
+  "Jack & Zo":['Jack Doyle','Zo DeMalia'], "Jack Doyle":['Jack Doyle'], "JoezMcfly":['Joez McFly'], "Jolly Olive":['Jolly Olive'],
+  "Jomboy & Jake TV":['Jomboy',"Talkin' Jake"], "Jomboy Media":['Jomboy'], "Lorenzo DeMalia":['Zo DeMalia'], "More Jomboy":['Jomboy'],
+  "Shea Station":['Jolly Olive'], "Shelfy":['Shelfy'], "Slashline":['1 - None'], "Swilly":['Swilly'],
+  "Talkin' Baseball":["Talkin' Jake",'Trevor Plouffe'], "Talkin' Giants":['Justin Penik'], "Talkin' Yanks":['Jomboy',"Talkin' Jake"],
+  "That's Cricket":['Adam Bannon'], "Wake n Jake":["Talkin' Jake"], "Warehouse Challenges":['Jimmy Knorp'],
+  "Warehouse Games":['2 - Warehouse'], "We Got Ice":['Jack Doyle','Zo DeMalia'], "Yankees Avenue":['Dan Rourke'],
+};
+// YouTube channel name → Iconik Channel ("That's Cricket!" → "That's Cricket", "JoezMcFly" → "JoezMcfly").
+function channelFor(ytName){
+  const k = squash(String(ytName).replace(/^the\s+/i,'')); if (!k) return '';   // "The Warehouse Games" → Warehouse Games
+  return LISTS.channel.find(c => squash(c) === k) || LISTS.channel.find(c => squash(c).length > 4 && (k.startsWith(squash(c)) || squash(c).startsWith(k))) || '';
 }
+// Iconik stores some options without their sort prefix ("None" for "1 - None").
+const ownerLabel = (v) => LISTS.owningCreator.find(o => o === v || o.replace(/^\d+\s*-\s*/,'') === v) || '';
+function ownersFor(channel){ return (CHANNEL_DEFAULTS[channel] || []).filter(n => LISTS.owningCreator.includes(n)); }
+// Live: whoever is on at least 60% of the channel's recently tagged assets.
+async function liveOwners(channel){
+  if (!channel) return null;
+  try{
+    const r = await fetch(`${YT_API}/iconik/channel-owners?channel=${encodeURIComponent(channel)}`);
+    const d = (await r.json())[channel];
+    if (!d || !d.sampled || d.sampled < 3) return null;
+    const names = d.owners.filter(([, n]) => n >= d.sampled * 0.6).map(([v]) => ownerLabel(v)).filter(Boolean);
+    return names.length ? names : null;
+  }catch{ return null; }
+}
+
 // Nicknames the blurbs use → the Iconik name.
 const CREATOR_ALIASES = [[/\bcoach trev\b|\btrevor plouffe\b/i, 'Trevor Plouffe'], [/\btalkin.? jake\b/i, "Talkin' Jake"], [/\bjomboy\b(?!\s*(?:media|&|and jake))/i, 'Jomboy'], [/\bzo\b(?! demalia)/i, 'Zo DeMalia']];
 function guestsIn(v, owners){
@@ -383,7 +403,8 @@ function ruleGuesses(v){
   s.sport = 'guess';
 
   // Owning Creator: whose show it is, from the channel. Guest Creator: other JM people the blurb or title names.
-  const owners = ownersFor(v.channel || '');
+  g.channel = channelFor(v.channel || ''); s.channel = g.channel ? 'yt' : 'guess';
+  const owners = ownersFor(g.channel);
   g.owningCreator = owners.length ? owners : [findOpt('owningCreator', NONE_RE)].filter(Boolean); s.owningCreator = 'guess';
   const guests = guestsIn(v, owners);
   g.guestCreator = guests.length ? guests : [findOpt('guestCreator', NONE_RE)].filter(Boolean); s.guestCreator = 'guess';
@@ -423,6 +444,14 @@ async function generate(){
   };
   state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ytShorts: v.short ? 'link' : 'none', ...s};
   $('#asset').value = ''; renderFields(); renderSource(); syncPushBtn(); $('#picks').innerHTML = '';
+  // Check Iconik for the channel's usual owners; only replaces the default if nobody has edited it yet.
+  liveOwners(state.values.channel).then(names => {
+    if (!names || state.video !== v || state.src.owningCreator === 'you') return;
+    state.values.owningCreator = names; state.src.owningCreator = 'iconik';
+    state.values.guestCreator = (state.values.guestCreator || []).filter(n => !names.includes(n));
+    if (!state.values.guestCreator.length) state.values.guestCreator = [findOpt('guestCreator', NONE_RE)].filter(Boolean);
+    renderFields();
+  });
   setStatus('YouTube fields are in. Asking AI for the description and tags…');
 
   try{

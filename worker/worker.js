@@ -130,7 +130,7 @@ const FIELD_LABELS = {
   episodeNum: 'Episode #', videoType: 'Video Type', sport: 'Sport & League', contentTag: 'Content Tag',
   ytShorts: 'YouTube Shorts Link', facebook: 'Facebook Link', instagram: 'Instagram Link', twitter: 'Twitter Link',
   tiktok: 'TikTok Link', linkedin: 'LinkedIn Link',
-  owningCreator: 'Owning Creator', guestCreator: 'Guest Creator',
+  channel: 'Channel', owningCreator: 'Owning Creator', guestCreator: 'Guest Creator',
   metaDone: 'All Metadata Updated?', thumbDone: 'Thumbnails Uploaded?',
 };
 // Toggles the worker sets itself; the page never sends them.
@@ -271,6 +271,31 @@ async function uploadPoster(env, assetId, t) {
   return { id: kf.id, bytes: img.bytes.length };
 }
 
+// Who usually owns each channel, learned from assets already tagged in Iconik (facet counts, read-only).
+async function channelOwners(env, only) {
+  const view = await getView(env);
+  const ch = (view.view_fields || []).find((f) => f.label === 'Channel');
+  const oc = (view.view_fields || []).find((f) => f.label === 'Owning Creator');
+  const names = only ? [only] : (ch.options || []).map((o) => o.value);
+  const out = {};
+  await Promise.all(names.map(async (name) => {
+    try {
+      // Newest 100 assets on the channel that already have an Owning Creator; tally who it is.
+      const r = await ik(env, '/search/v1/search/?per_page=100&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
+        doc_types: ['assets'], include_fields: ['id', `metadata.${oc.name}`], sort: [{ name: 'date_created', order: 'desc' }],
+        filter: { operator: 'AND', terms: [{ name: `metadata.${ch.name}`, value_in: [name] }, { name: `metadata.${oc.name}`, exists: true }] } }) });
+      const tally = {};
+      for (const o of r.objects || []) {
+        const v = ((o.metadata || {})[oc.name]);
+        for (const x of (Array.isArray(v) ? v : v ? [v] : [])) tally[x] = (tally[x] || 0) + 1;
+      }
+      out[name] = { tagged: r.total, sampled: (r.objects || []).length, owners: Object.entries(tally).sort((a, b) => b[1] - a[1]),
+        ...(only ? { sample: (r.objects || []).slice(0, 2) } : {}) };
+    } catch (e) { out[name] = { error: String(e.message).slice(0, 200) }; }
+  }));
+  return out;
+}
+
 async function iconikCheck(env) {
   if (!env.ICONIK_APP_ID || !env.ICONIK_AUTH_TOKEN) return { ready: false, why: 'ICONIK_APP_ID / ICONIK_AUTH_TOKEN are not set on the worker yet.' };
   const view = await getView(env);
@@ -326,6 +351,7 @@ export default {
       const origin = request.headers.get('Origin');
       if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
       try {
+        if (url.pathname === '/iconik/channel-owners') { const r = json(await channelOwners(env, url.searchParams.get('channel'))); r.headers.set('Cache-Control', 'no-store'); return r; }
         if (url.pathname === '/iconik/check') { const r = json(await iconikCheck(env)); r.headers.set('Cache-Control', 'no-store'); return r; }
         if (url.pathname === '/iconik/push' && request.method === 'POST') {
           if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
