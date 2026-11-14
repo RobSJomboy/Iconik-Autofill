@@ -130,6 +130,7 @@ const FIELD_LABELS = {
   episodeNum: 'Episode #', videoType: 'Video Type', sport: 'Sport & League', contentTag: 'Content Tag',
   ytShorts: 'YouTube Shorts Link', facebook: 'Facebook Link', instagram: 'Instagram Link', twitter: 'Twitter Link',
   tiktok: 'TikTok Link', linkedin: 'LinkedIn Link',
+  owningCreator: 'Owning Creator', guestCreator: 'Guest Creator',
   metaDone: 'All Metadata Updated?', thumbDone: 'Thumbnails Uploaded?',
 };
 // Toggles the worker sets itself; the page never sends them.
@@ -276,7 +277,7 @@ async function iconikCheck(env) {
   const m = mapFields(view);
   return { ready: true, view: { id: view.id, name: view.name }, needsKey: !!env.PUSH_KEY,
     fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])),
-    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type, required: !!f.required, ...(/warning/i.test(f.label || '') ? { options: f.options || [] } : {}) })) };
+    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type, required: !!f.required, multi: !!f.multi, ...(/warning|creator|channel|series/i.test(f.label || '') ? { options: f.options || [] } : {}) })) };
 }
 
 async function iconikPush(env, body) {
