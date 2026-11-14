@@ -561,9 +561,10 @@ async function pushToIconik(assetOverride){
     }
     $('#asset').value = a.asset.url;
     const skipped = a.skipped.length ? ` Skipped: ${a.skipped.map(x => esc(x.field)+' ('+esc(x.why)+')').join('; ')}.` : '';
+    const clearedMsg = (a.cleared||[]).length ? ` Cleared ${a.cleared.map(esc).join(' and ')}.` : '';
     const posterMsg = a.poster === 'uploaded' ? ' Poster uploaded.' : /^failed/.test(a.poster||'') ? ` Poster didn’t upload (${esc(a.poster.slice(8))}).` : '';
     const req = (a.missingRequired||[]).length ? ` Still empty in Iconik: ${a.missingRequired.map(esc).join(', ')}, so All Metadata Updated stays off.` : '';
-    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${posterMsg}${skipped}${req}`, !!a.skipped.length || /^failed/.test(a.poster||'') || !!req);
+    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${posterMsg}${clearedMsg}${skipped}${req}`, !!a.skipped.length || /^failed/.test(a.poster||'') || !!req);
   }catch(e){
     setStatus('Iconik push failed: ' + e.message, true);
   }finally{ syncPushBtn(); }

@@ -276,7 +276,7 @@ async function iconikCheck(env) {
   const m = mapFields(view);
   return { ready: true, view: { id: view.id, name: view.name }, needsKey: !!env.PUSH_KEY,
     fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])),
-    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type })) };
+    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type, required: !!f.required, ...(/warning/i.test(f.label || '') ? { options: f.options || [] } : {}) })) };
 }
 
 async function iconikPush(env, body) {
@@ -306,9 +306,15 @@ async function iconikPush(env, body) {
   const toggles = {};
   if (m.metaDone) { toggles.metaDone = !skipped.length && !missingReq.length; if (toggles.metaDone) { metadata_values[m.metaDone.name] = { field_values: [{ value: true }] }; written.push(m.metaDone.label); } }
   if (m.thumbDone && poster) { metadata_values[m.thumbDone.name] = { field_values: [{ value: true }] }; written.push(m.thumbDone.label); }
+  // Clear Iconik's warning badges once the work they flag is done ("FINAL EDIT-NEEDS METADATA", "NEEDS THUMBNAILS").
+  const warn = (label) => (view.view_fields || []).find((f) => sq(f.label) === sq(label));
+  const cleared = [];
+  const fw = warn('Final Asset-Warning'), tw = warn('Needs Thumbnails-Warning');
+  if (fw && toggles.metaDone) { metadata_values[fw.name] = { field_values: [] }; cleared.push(fw.label); }
+  if (tw && poster) { metadata_values[tw.name] = { field_values: [] }; cleared.push(tw.label); }
   if (!body.dryRun) await ik(env, `/metadata/v1/assets/${assetId}/views/${view.id}/`, { method: 'PUT', body: JSON.stringify({ metadata_values }) });
   return [{ ok: true, dryRun: !!body.dryRun, asset: { id: assetId, title: asset.title, url: `https://app.iconik.io/asset/${assetId}` }, written, skipped,
-    missingRequired: missingReq, poster: poster ? 'uploaded' : posterError ? 'failed: ' + posterError : 'not sent', ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
+    missingRequired: missingReq, cleared, poster: poster ? 'uploaded' : posterError ? 'failed: ' + posterError : 'not sent', ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
 }
 
 export default {
