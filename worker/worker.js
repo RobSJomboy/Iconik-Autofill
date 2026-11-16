@@ -343,6 +343,92 @@ async function iconikPush(env, body) {
     missingRequired: missingReq, cleared, poster: poster ? 'uploaded' : posterError ? 'failed: ' + posterError : 'not sent', ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
 }
 
+// ───────────────────────── YouTube captions (our own channels) ─────────────────────────
+// A channel manager signs in once (/yt/connect). The refresh token is kept in KV per channel, and the worker
+// reads that channel's caption tracks with the official API (captions.list + captions.download).
+// Secrets: YT_CLIENT_ID, YT_CLIENT_SECRET (an OAuth "Web application" client in the jomboy-tools Google project).
+const WORKER_URL = 'https://jomboy-yt.jomboymedia.workers.dev';
+const YT_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
+const html = (body, s = 200) => new Response(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>YouTube connection</title><body style="font:16px/1.5 system-ui;max-width:560px;margin:60px auto;padding:0 16px">${body}</body>`, { status: s, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+
+async function ytConnect(env) {
+  if (!env.YT_CLIENT_ID) return html('<h2>Not set up yet</h2><p>The worker needs YT_CLIENT_ID and YT_CLIENT_SECRET first.</p>', 503);
+  const state = crypto.randomUUID();
+  await env.YT_AUTH.put('state:' + state, '1', { expirationTtl: 600 });
+  const q = new URLSearchParams({ client_id: env.YT_CLIENT_ID, redirect_uri: WORKER_URL + '/yt/callback', response_type: 'code',
+    scope: YT_SCOPE, access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true', state });
+  return Response.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + q, 302);
+}
+async function ytCallback(env, url) {
+  const code = url.searchParams.get('code'), state = url.searchParams.get('state');
+  if (url.searchParams.get('error')) return html(`<h2>Not connected</h2><p>Google said: ${url.searchParams.get('error')}</p>`, 400);
+  if (!code || !state || !(await env.YT_AUTH.get('state:' + state))) return html('<h2>That link expired</h2><p>Start again from the Connect link.</p>', 400);
+  await env.YT_AUTH.delete('state:' + state);
+  const t = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code, client_id: env.YT_CLIENT_ID, client_secret: env.YT_CLIENT_SECRET, redirect_uri: WORKER_URL + '/yt/callback', grant_type: 'authorization_code' }) })).json();
+  if (!t.refresh_token) return html(`<h2>Not connected</h2><p>Google didn't hand back a lasting sign-in (${t.error || 'no refresh token'}). Try again.</p>`, 400);
+  const ch = await (await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', { headers: { Authorization: 'Bearer ' + t.access_token } })).json();
+  const c = (ch.items || [])[0];
+  if (!c) return html('<h2>No channel on that account</h2><p>When Google asks which account to use, pick the <b>channel</b> (for example Talkin\' Baseball), not your personal profile.</p>', 400);
+  await env.YT_AUTH.put('rt:' + c.id, t.refresh_token);
+  await env.YT_AUTH.put('name:' + c.id, c.snippet.title);
+  return html(`<h2>Connected ${c.snippet.title} ✅</h2><p>Iconik Autofill can now read this channel's captions to find ad-read timestamps. You can close this tab.</p>`);
+}
+const tokenCache = {};
+async function ytAccess(env, channelId) {
+  const c = tokenCache[channelId];
+  if (c && c.exp > Date.now() + 60000) return c.token;
+  const rt = await env.YT_AUTH.get('rt:' + channelId);
+  if (!rt) return null;
+  const t = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: env.YT_CLIENT_ID, client_secret: env.YT_CLIENT_SECRET, refresh_token: rt, grant_type: 'refresh_token' }) })).json();
+  if (!t.access_token) throw new Error('YouTube sign-in for this channel stopped working (' + (t.error || 'no token') + '). Reconnect it.');
+  tokenCache[channelId] = { token: t.access_token, exp: Date.now() + (t.expires_in || 3000) * 1000 };
+  return t.access_token;
+}
+// "00:12:34.560" → seconds
+const vttSec = (s) => s.split(':').reduce((a, x) => a * 60 + parseFloat(x), 0);
+// Every place each search term is said. reads: [{id, terms:[...]}] → {id: [seconds…]}
+async function ytAdTimes(env, videoId, reads) {
+  if (!env.YT_KEY) throw new Error('YT_KEY missing');
+  const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${env.YT_KEY}`)).json();
+  const sn = ((v.items || [])[0] || {}).snippet;
+  if (!sn) throw new Error('video not found');
+  const token = await ytAccess(env, sn.channelId);
+  if (!token) return { connected: false, channel: sn.channelTitle, connectUrl: WORKER_URL + '/yt/connect' };
+  const auth = { Authorization: 'Bearer ' + token };
+  const list = await (await fetch(`https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}`, { headers: auth })).json();
+  if (list.error) throw new Error('captions.list: ' + list.error.message);
+  const tracks = list.items || [];
+  const en = (t) => /^en/i.test(t.snippet.language || '');
+  const track = tracks.find((t) => en(t) && t.snippet.trackKind !== 'asr') || tracks.find((t) => en(t)) || tracks[0];
+  if (!track) return { connected: true, channel: sn.channelTitle, noCaptions: true };
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/captions/${track.id}?tfmt=vtt`, { headers: auth });
+  if (!r.ok) throw new Error('captions.download ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  const vtt = await r.text();
+  // Flatten cues into one lowercase string, remembering where each cue starts.
+  let text = '', marks = [];
+  for (const m of vtt.matchAll(/(\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{2}:\d{2}\.\d{3}) --> [^\n]*\n([\s\S]*?)(?=\n\n|$)/g)) {
+    const words = m[2].replace(/<[^>]+>/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!words) continue;
+    marks.push([text.length, vttSec(m[1])]);
+    text += words + ' ';
+  }
+  const timeAt = (pos) => { let s = 0; for (const [p, t] of marks) { if (p > pos) break; s = t; } return s; };
+  const out = {};
+  for (const rd of reads || []) {
+    const times = [];
+    for (const term of rd.terms || []) {
+      const key = String(term).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (key.length < 3) continue;
+      const re = new RegExp('\\b' + key.split('').join(' ?') + '\\b', 'g');   // "seatgeek" also matches "seat geek"
+      for (const m of text.matchAll(re)) times.push(Math.round(timeAt(m.index)));
+    }
+    out[rd.id] = [...new Set(times)].sort((a, b) => a - b);
+  }
+  return { connected: true, channel: sn.channelTitle, track: track.snippet.trackKind, hits: out };
+}
+
 // ───────────────────────── monday.com ─────────────────────────
 // Secret: MONDAY_TOKEN (a personal API token). Read-only check for now.
 async function mon(env, query, variables = {}) {
@@ -436,6 +522,14 @@ export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === '/yt/connect') return ytConnect(env);
+    if (url.pathname === '/yt/callback') return ytCallback(env, url);
+    if (url.pathname === '/yt/ads' && request.method === 'POST') {
+      const origin = request.headers.get('Origin');
+      if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
+      try { const b = await request.json(); const r = json(await ytAdTimes(env, b.videoId, b.reads)); r.headers.set('Cache-Control', 'no-store'); return r; }
+      catch (e) { return json({ error: String(e && e.message || e) }, 502); }
+    }
     if (url.pathname === '/monday/episode' || url.pathname === '/monday/update') {
       const origin = request.headers.get('Origin');
       if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);

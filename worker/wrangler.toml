@@ -5,3 +5,8 @@ compatibility_date = "2025-06-01"
 # Cloudflare Workers AI — writes the one-sentence description and picks dropdown values.
 [ai]
 binding = "AI"
+
+# Holds the YouTube channel sign-in (refresh token per channel) used to read our own captions.
+[[kv_namespaces]]
+binding = "YT_AUTH"
+id = "f751d9c287694d09a2678ec80917a9ae"

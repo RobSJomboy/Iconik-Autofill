@@ -744,12 +744,13 @@ async function loadMonday(v){
     state.monday = {...d, pick: 0, rows: {}};
     $('#monEp').innerHTML = d.episodes.map((e,i) => `<option value="${i}">${esc(e.name)}</option>`).join('');
     renderMonday();
+    findAdTimes(v);
   }catch(e){ $('#monReads').innerHTML = `<div class="monnote">Couldn’t reach monday (${esc(e.message)}).</div>`; }
 }
 function renderMonday(){
   const m = state.monday; if (!m) return;
   const ep = m.episodes[m.pick];
-  $('#monReads').innerHTML = `<div class="monnote">Ticked reads get the YouTube link, the timestamp, and Production Status → Published when you push. <a href="${esc(ep.url)}" target="_blank" rel="noopener">Open in monday</a></div>` +
+  $('#monReads').innerHTML = `<div class="monnote">Ticked reads get the YouTube link, the timestamp, and Production Status → Published when you push. <a href="${esc(ep.url)}" target="_blank" rel="noopener">Open in monday</a>${m.capNote ? '<br>' + m.capNote : ''}</div>` +
     ep.reads.map(r => {
       const row = m.rows[r.id] ||= (() => {
         const on = readMatchesSponsor(r) || (!SKIP_SALES.test(r.sales) && r.status !== m.published);
@@ -758,13 +759,46 @@ function renderMonday(){
       })();
       return `<div class="mread${row.on?'':' off'}" data-id="${esc(r.id)}">
         <input type="checkbox" data-m="on" ${row.on?'checked':''} aria-label="Update ${esc(r.name)}">
-        <div class="nm">${esc(r.name)}<small>${esc(r.sales||'')} · <span class="pill${r.status===m.published?' pub':''}">${esc(r.status||'No status')}</span></small></div>
+        <div class="nm">${esc(r.name)}<small>${esc(r.sales||'')} · <span class="pill${r.status===m.published?' pub':''}">${esc(r.status||'No status')}</span>${row.found ? ` · said at ${row.found.slice(0,4).map(fmtSec).join(', ')}${row.found.length>4?'…':''}` : ''}</small></div>
         <input type="text" data-m="ts" value="${esc(row.ts)}" placeholder="Timestamp" aria-label="Timestamp for ${esc(r.name)}">
         <label class="pub"><input type="checkbox" data-m="publish" ${row.publish?'checked':''}> Published</label>
       </div>`;
     }).join('');
 }
-$('#monEp').addEventListener('change', e => { state.monday.pick = +e.target.value; state.monday.rows = {}; renderMonday(); });
+$('#monEp').addEventListener('change', e => { state.monday.pick = +e.target.value; state.monday.rows = {}; renderMonday(); findAdTimes(state.video); });
+
+// Find each ad read in the episode's YouTube captions; the first mention (minus a few seconds) becomes its timestamp.
+const fmtSec = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60; return (h ? h+':'+String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
+function adTerms(r){
+  const base = r.name.replace(/\(.*?\)/g,'').replace(/\|.*$/,'').trim();
+  const terms = [base, (r.tag||'').replace(/_/g,' ')];
+  const first = base.split(/\s+/)[0]; if (first.length >= 5) terms.push(first);            // "Fanatics Sports & Casino" → also "Fanatics"
+  return [...new Set(terms.filter(Boolean))];
+}
+async function findAdTimes(v){
+  const m = state.monday; if (!m) return;
+  const ep = m.episodes[m.pick];
+  const reads = ep.reads.filter(r => !SKIP_SALES.test(r.sales)).map(r => ({id: r.id, terms: adTerms(r)}));
+  if (!reads.length) return;
+  const note = $('#monReads .monnote');
+  try{
+    const r = await fetch(`${YT_API}/yt/ads`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({videoId: v.id, reads})});
+    const a = await r.json();
+    if (state.video !== v || state.monday !== m) return;
+    if (!r.ok || a.error) throw new Error(a.error || 'HTTP '+r.status);
+    if (!a.connected){ m.capNote = `To fill timestamps automatically, someone who manages ${esc(a.channel)} on YouTube needs to <a href="${esc(a.connectUrl)}" target="_blank" rel="noopener">connect the channel</a> once.`; renderMonday(); return; }
+    if (a.noCaptions){ m.capNote = 'YouTube has no captions on this video yet, so type the timestamps.'; renderMonday(); return; }
+    let filled = 0;
+    for (const rd of ep.reads){
+      const times = a.hits[rd.id] || [], row = m.rows[rd.id];
+      if (!row || !times.length) continue;
+      row.found = times;
+      if (!row.ts){ row.ts = fmtSec(times[0] - 3); row.publish = row.on; row.auto = true; filled++; }
+    }
+    m.capNote = filled ? `Found ${filled} timestamp${filled>1?'s':''} in the captions (first mention, 3 s early). Check them before pushing.` : 'Captions checked: no new ad-read mentions found.';
+    renderMonday();
+  }catch(e){ m.capNote = `Couldn’t read the captions (${esc(e.message)}).`; renderMonday(); }
+}
 $('#monReads').addEventListener('input', e => {
   const el = e.target, id = el.closest('.mread')?.dataset.id; if (!id) return;
   const row = state.monday.rows[id];
