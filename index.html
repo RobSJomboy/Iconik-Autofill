@@ -742,7 +742,7 @@ async function loadMonday(v){
     // Best episode: one already holding this video's link, else the one whose reads match the most sponsors.
     // Channels with several boards (JM Baseball: Baseball Today + Trivia) also lean on the show name being in the video title.
     const titleHas = ep => { const w = squash(ep.name.split(/\s+-\s+/)[0].replace(/^JM\s+/i,'')); return w.length > 3 && squash(v.title).includes(w); };
-    const score = ep => ep.reads.some(r => r.link.includes(v.id)) ? 100 : ep.reads.filter(readMatchesSponsor).length + (titleHas(ep) ? 10 : 0);
+    const score = ep => ep.reads.some(r => r.link.includes(v.id)) ? 100 : ep.reads.filter(readMatchesSponsor).length + (titleHas(ep) ? 10 : 0) + (ep.off ? 0 : 20);
     d.episodes.sort((a,b) => score(b) - score(a));
     state.monday = {...d, pick: 0, rows: {}};
     $('#monEp').innerHTML = d.episodes.map((e,i) => `<option value="${i}">${esc(e.name)}${(d.boards||[]).length > 1 ? ' · ' + esc(e.show) + ' board' : ''}</option>`).join('');

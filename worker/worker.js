@@ -484,8 +484,12 @@ async function boardEpisodes(env, cfg, date) {
     if (grp) for (const it of grp.items_page.items) items.push({ ...it, group: g.title });
   }));
   const val = (cols, id) => (cols.find((c) => c.id === id) || {}).text || '';
-  return items.filter((it) => dayOf(val(it.column_values, cfg.itemDate)) === date || (it.subitems || []).some((s) => dayOf(val(s.column_values, S.date)) === date))
-    .map((it) => ({ id: it.id, name: it.name, group: it.group, board: cfg.board, show: cfg.show || cfg.group || gq.boards[0].name,
+  // Livestreams and late uploads often land a day off the board's date, so look one day either side; off = 0 is an exact match.
+  const shift = (n) => new Date(Date.parse(date + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  const offOf = (it) => { const ds = [dayOf(val(it.column_values, cfg.itemDate)), ...(it.subitems || []).map((s) => dayOf(val(s.column_values, S.date)))];
+    return ds.includes(date) ? 0 : ds.includes(shift(-1)) || ds.includes(shift(1)) ? 1 : -1; };
+  return items.filter((it) => offOf(it) >= 0)
+    .map((it) => ({ id: it.id, off: offOf(it), name: it.name, group: it.group, board: cfg.board, show: cfg.show || cfg.group || gq.boards[0].name,
       url: `https://jomboymedia.monday.com/boards/${cfg.board}/pulses/${it.id}`,
       reads: (it.subitems || []).map((s) => ({ id: s.id, name: s.name, tag: val(s.column_values, S.tag), sales: val(s.column_values, S.sales),
         status: val(s.column_values, S.status), link: val(s.column_values, S.link).replace(/^.* - (https?:)/, '$1'), ts: val(s.column_values, S.ts) })) }));
