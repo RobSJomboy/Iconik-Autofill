@@ -711,7 +711,6 @@ $('#fields').addEventListener('paste', e => {
 renderThumb();
 
 // ── monday.com: tick off the episode's ad reads (link + timestamp + Production Status → Published) ──
-const MONDAY_CHANNELS = ["Talkin' Baseball"];
 const nyDate = (iso) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(iso)).map(x=>[x.type,x.value])); return `${p.year}-${p.month}-${p.day}`; };
 // "1:21:42", "81:42", "01:21:42:15" (editor timecode, frames dropped) → "1:21:42"; anything else stays as typed.
 function cleanTs(t){
@@ -730,22 +729,26 @@ function readMatchesSponsor(r){
 async function loadMonday(v){
   const panel = $('#mondayPanel');
   state.monday = null;
-  if (!MONDAY_CHANNELS.includes(state.values.channel)) { panel.hidden = true; return; }
-  panel.hidden = false; $('#monReads').innerHTML = '<div class="monnote">Looking for this episode on the monday board…</div>'; $('#monEp').innerHTML = '';
+  if (!state.values.channel || NONE_RE.test(state.values.channel)) { panel.hidden = true; return; }
+  $('#monReads').innerHTML = '<div class="monnote">Looking for this episode on the monday board…</div>'; $('#monEp').innerHTML = '';
   try{
     const r = await fetch(`${YT_API}/monday/episode?channel=${encodeURIComponent(state.values.channel)}&date=${nyDate(v.publishDate)}`);
     const d = await r.json();
     if (state.video !== v) return;
+    if (d.supported === false) { panel.hidden = true; return; }        // channel has no ad-read board
+    panel.hidden = false;
     if (!r.ok || d.error) throw new Error(d.error || 'HTTP '+r.status);
     if (!d.episodes.length){ $('#monReads').innerHTML = `<div class="monnote">No episode on the monday board for ${esc(nyDate(v.publishDate))}.</div>`; return; }
     // Best episode: one already holding this video's link, else the one whose reads match the most sponsors.
-    const score = ep => ep.reads.some(r => r.link.includes(v.id)) ? 100 : ep.reads.filter(readMatchesSponsor).length;
+    // Channels with several boards (JM Baseball: Baseball Today + Trivia) also lean on the show name being in the video title.
+    const titleHas = ep => { const w = squash(ep.name.split(/\s+-\s+/)[0].replace(/^JM\s+/i,'')); return w.length > 3 && squash(v.title).includes(w); };
+    const score = ep => ep.reads.some(r => r.link.includes(v.id)) ? 100 : ep.reads.filter(readMatchesSponsor).length + (titleHas(ep) ? 10 : 0);
     d.episodes.sort((a,b) => score(b) - score(a));
     state.monday = {...d, pick: 0, rows: {}};
-    $('#monEp').innerHTML = d.episodes.map((e,i) => `<option value="${i}">${esc(e.name)}</option>`).join('');
+    $('#monEp').innerHTML = d.episodes.map((e,i) => `<option value="${i}">${esc(e.name)}${(d.boards||[]).length > 1 ? ' · ' + esc(e.show) + ' board' : ''}</option>`).join('');
     renderMonday();
     findAdTimes(v);
-  }catch(e){ $('#monReads').innerHTML = `<div class="monnote">Couldn’t reach monday (${esc(e.message)}).</div>`; }
+  }catch(e){ panel.hidden = false; $("#monReads").innerHTML = `<div class="monnote">Couldn’t reach monday (${esc(e.message)}).</div>`; }
 }
 function renderMonday(){
   const m = state.monday; if (!m) return;
@@ -819,7 +822,7 @@ function mondayUpdates(){
 async function pushMonday(){
   const updates = mondayUpdates(); if (!updates.length) return '';
   try{
-    const r = await fetch(`${YT_API}/monday/update`, {method:'POST', headers:{'Content-Type':'application/json','X-Push-Key':getKey()}, body: JSON.stringify({channel: state.values.channel, updates})});
+    const r = await fetch(`${YT_API}/monday/update`, {method:'POST', headers:{'Content-Type':'application/json','X-Push-Key':getKey()}, body: JSON.stringify({channel: state.values.channel, board: state.monday.episodes[state.monday.pick].board, updates})});
     const a = await r.json();
     if (!r.ok || a.error) throw new Error(a.error || 'HTTP '+r.status);
     const pub = updates.filter(u => u.publish && a.done.includes(u.id)).length;

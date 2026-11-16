@@ -440,55 +440,85 @@ async function mon(env, query, variables = {}) {
   return d.data;
 }
 // Ad-read boards by channel. Episodes are items; each ad read is a subitem with YT Link, Timestamp, Production Status.
-const MONDAY_BOARDS = {
-  "Talkin' Baseball": { board: '7655278256', itemDate: 'dup__of_recording_date6__1',
-    sub: { link: 'text__1', ts: 'text8__1', status: 'status__1', date: 'dup__of_publish_date7__1', tag: 'tags__1', sales: 'status' },
-    published: 'Published' },
-};
+// Each Iconik channel (same names as the folders under Iconik › Channels) → its monday board(s).
+// Standard template columns; Talkin' Giants is the one board built from an older template.
+const STD = { itemDate: 'dup__of_recording_date6__1',
+  sub: { link: 'text__1', ts: 'text8__1', status: 'status__1', date: 'dup__of_publish_date7__1', tag: 'tags__1', sales: 'status' } };
+const MONDAY_SHOWS = [
+  { channel: "Talkin' Baseball", board: '7655278256', ...STD },
+  { channel: "Talkin' Yanks", board: '7639193705', ...STD },
+  { channel: "Talkin' Giants", board: '7581559368', itemDate: 'dup__of_recording_date__1', linkType: 'link',
+    sub: { link: 'link__1', ts: 'text8__1', status: 'status__1', date: 'dup__of_date__1', tag: 'tags__1', sales: 'status' } },
+  { channel: 'Shea Station', board: '7727385587', ...STD },
+  { channel: 'Jolly Olive', board: '7654759133', ...STD },
+  { channel: 'Wake n Jake', board: '7704231844', ...STD },
+  { channel: 'Jomboy & Jake TV', board: '18406428859', show: 'Jomboy & Jake Radio', ...STD },
+  { channel: 'JM Baseball', board: '7631118157', show: 'Baseball Today', ...STD },
+  { channel: 'JM Baseball', board: '7646752999', show: 'JM Baseball Trivia', ...STD },
+  { channel: 'Jomboy Media', board: '7641237614', show: 'Breakdowns', ...STD },
+  { channel: 'JM Football', board: '7705065135', show: 'Football Today', ...STD },
+  { channel: 'JM Football', board: '7657595719', show: 'JM Football Trivia', ...STD },
+  { channel: 'Shelfy', board: '7714846314', ...STD },
+  { channel: 'We Got Ice', board: '7654531987', group: 'We Got Ice', ...STD },
+  { channel: 'Jack & Zo', board: '7654531987', group: 'Jack & Zo', ...STD },
+  { channel: 'Warehouse Challenges', board: '18336429820', ...STD },
+  { channel: 'Cherry Pinstripes', board: '7728401910', ...STD },
+];
+const PUBLISHED = 'Published';
+const showsFor = (channel) => MONDAY_SHOWS.filter((c) => sq(c.channel) === sq(channel));
 const dayOf = (t) => (String(t || '').match(/\d{4}-\d{2}-\d{2}/) || [''])[0];
 
-// Episode(s) on the board for a publish date, with their ad-read subitems.
-async function mondayEpisode(env, channel, date) {
-  const cfg = MONDAY_BOARDS[channel];
-  if (!cfg) return { supported: false };
-  if (!env.MONDAY_TOKEN) return { supported: true, error: 'MONDAY_TOKEN is not set' };
-  // Only that year's groups ("2026 Standard", "2026 TPP's"), and only the columns we use: keeps it to a second or two.
-  const S0 = cfg.sub, subCols = JSON.stringify([S0.link, S0.ts, S0.status, S0.date, S0.tag, S0.sales]);
-  const gq = await mon(env, `query($ids:[ID!]){ boards(ids:$ids){ groups{ id title } } }`, { ids: [cfg.board] });
-  const year = date.slice(0, 4);
-  let groups = gq.boards[0].groups.filter((g) => g.title.includes(year));
-  if (!groups.length) groups = gq.boards[0].groups;
+async function boardEpisodes(env, cfg, date) {
+  const S = cfg.sub, subCols = JSON.stringify([S.link, S.ts, S.status, S.date, S.tag, S.sales]);
+  const gq = await mon(env, `query($ids:[ID!]){ boards(ids:$ids){ name groups{ id title } } }`, { ids: [cfg.board] });
+  let groups = gq.boards[0].groups;
+  if (cfg.group) groups = groups.filter((g) => g.title.toLowerCase().startsWith(cfg.group.toLowerCase()));
+  // Only that year's groups ("2026 Standard", "2026 TPP's") when the board names them by year: keeps it to a second or two.
+  const year = date.slice(0, 4), yearly = groups.filter((g) => g.title.includes(year));
+  if (yearly.length) groups = yearly;
   const items = [];
   await Promise.all(groups.map(async (g) => {
-    const d = await mon(env, `query($ids:[ID!], $g:[String]){ boards(ids:$ids){ groups(ids:$g){ title items_page(limit:500){ items{ id name
+    const d = await mon(env, `query($ids:[ID!], $g:[String]){ boards(ids:$ids){ groups(ids:$g){ items_page(limit:500){ items{ id name
       column_values(ids:["${cfg.itemDate}"]){ id text } subitems{ id name column_values(ids:${subCols}){ id text } } } } } } }`, { ids: [cfg.board], g: [g.id] });
-    for (const it of d.boards[0].groups[0].items_page.items) items.push({ ...it, group: { title: g.title } });
+    const grp = d.boards[0].groups[0];
+    if (grp) for (const it of grp.items_page.items) items.push({ ...it, group: g.title });
   }));
-  const S = cfg.sub;
   const val = (cols, id) => (cols.find((c) => c.id === id) || {}).text || '';
-  const episodes = items.filter((it) => dayOf(val(it.column_values, cfg.itemDate)) === date || it.subitems.some((s) => dayOf(val(s.column_values, S.date)) === date))
-    .map((it) => ({ id: it.id, name: it.name, group: it.group.title, url: `https://jomboymedia.monday.com/boards/${cfg.board}/pulses/${it.id}`,
-      reads: it.subitems.map((s) => ({ id: s.id, name: s.name, tag: val(s.column_values, S.tag), sales: val(s.column_values, S.sales),
-        status: val(s.column_values, S.status), link: val(s.column_values, S.link), ts: val(s.column_values, S.ts) })) }));
-  return { supported: true, board: cfg.board, published: cfg.published, episodes };
+  return items.filter((it) => dayOf(val(it.column_values, cfg.itemDate)) === date || (it.subitems || []).some((s) => dayOf(val(s.column_values, S.date)) === date))
+    .map((it) => ({ id: it.id, name: it.name, group: it.group, board: cfg.board, show: cfg.show || cfg.group || gq.boards[0].name,
+      url: `https://jomboymedia.monday.com/boards/${cfg.board}/pulses/${it.id}`,
+      reads: (it.subitems || []).map((s) => ({ id: s.id, name: s.name, tag: val(s.column_values, S.tag), sales: val(s.column_values, S.sales),
+        status: val(s.column_values, S.status), link: val(s.column_values, S.link).replace(/^.* - (https?:)/, '$1'), ts: val(s.column_values, S.ts) })) }));
+}
+
+// Episode(s) for a publish date across every board that channel uses, with their ad-read subitems.
+async function mondayEpisode(env, channel, date) {
+  const shows = showsFor(channel);
+  if (!shows.length) return { supported: false };
+  if (!env.MONDAY_TOKEN) return { supported: true, error: 'MONDAY_TOKEN is not set' };
+  const lists = await Promise.all(shows.map((c) => boardEpisodes(env, c, date)));
+  return { supported: true, boards: shows.map((c) => c.show || c.channel), published: PUBLISHED, episodes: lists.flat() };
 }
 
 // Writes link + timestamp on each ad read, and Production Status → Published where asked.
-async function mondayUpdate(env, channel, updates) {
-  const cfg = MONDAY_BOARDS[channel];
-  if (!cfg) throw new Error('No monday board for ' + channel);
+async function mondayUpdate(env, channel, updates, board) {
+  const shows = showsFor(channel);
+  const cfg = shows.find((c) => c.board === String(board)) || (shows.length === 1 && shows[0]);
+  if (!cfg) throw new Error('No monday board for ' + channel + (board ? ' / ' + board : ''));
   const S = cfg.sub, done = [], failed = [];
   for (const u of updates || []) {
     const cv = {};
-    if (u.link) cv[S.link] = String(u.link);
+    if (u.link) cv[S.link] = cfg.linkType === 'link' ? { url: String(u.link), text: String(u.link) } : String(u.link);
     if (u.ts) cv[S.ts] = String(u.ts);
-    if (u.publish) cv[S.status] = { label: cfg.published };
+    if (u.publish) cv[S.status] = { label: PUBLISHED };
     if (!Object.keys(cv).length) continue;
     try {
-      // Subitems live on their own board; monday finds it from the item id when board_id is the subitem board.
-      const b = await mon(env, `query($id:[ID!]){ items(ids:$id){ board{ id } } }`, { id: [String(u.id)] });
+      // Subitems live on their own board; ask monday which one from the item id.
+      const b = await mon(env, `query($id:[ID!]){ items(ids:$id){ board{ id } parent_item{ board{ id } } } }`, { id: [String(u.id)] });
+      const it = b.items[0];
+      if (!it || (it.parent_item && it.parent_item.board.id !== cfg.board)) throw new Error('That ad read is not on the ' + (cfg.show || channel) + ' board');
       await mon(env, `mutation($b:ID!, $i:ID!, $v:JSON!){ change_multiple_column_values(board_id:$b, item_id:$i, column_values:$v){ id } }`,
-        { b: b.items[0].board.id, i: String(u.id), v: JSON.stringify(cv) });
+        { b: it.board.id, i: String(u.id), v: JSON.stringify(cv) });
       done.push(u.id);
     } catch (e) { failed.push({ id: u.id, why: String(e.message).slice(0, 200) }); }
   }
@@ -545,7 +575,7 @@ export default {
         if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
         if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
         const body = await request.json();
-        const r = json(await mondayUpdate(env, body.channel, body.updates)); r.headers.set('Cache-Control', 'no-store'); return r;
+        const r = json(await mondayUpdate(env, body.channel, body.updates, body.board)); r.headers.set('Cache-Control', 'no-store'); return r;
       } catch (e) { return json({ error: String(e && e.message || e) }, 502); }
     }
     if (url.pathname === '/monday/check') {
