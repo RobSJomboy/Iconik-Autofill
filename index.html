@@ -50,6 +50,18 @@ button,input,select,textarea{font:inherit;color:inherit}
 .grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px;align-items:start}
 @media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
 
+.col{display:flex;flex-direction:column;gap:18px;min-width:0}
+#monEp{max-width:60%;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:5px 8px;font-size:12.5px;color:inherit}
+.mread{display:grid;grid-template-columns:auto minmax(0,1fr) 108px auto;gap:6px 10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--rule)}
+.mread:last-child{border-bottom:0}
+.mread .nm{font-weight:600;font-size:13.5px;line-height:1.25}
+.mread .nm small{display:block;font:11px/1.4 var(--mono);color:var(--dim);font-weight:400}
+.mread input[type=text]{width:100%;background:var(--well);border:1px solid var(--rule);border-radius:5px;padding:6px 8px;font:12.5px/1.2 var(--mono);color:inherit}
+.mread label.pub{font-size:12px;display:flex;gap:5px;align-items:center;white-space:nowrap}
+.mread.off{opacity:.5}
+.pill{display:inline-block;border-radius:999px;padding:1px 8px;font:10.5px/1.6 var(--mono);border:1px solid var(--rule)}
+.pill.pub{border-color:var(--ok);color:var(--ok)}
+.monnote{padding:10px 16px;font-size:13px;color:var(--dim)}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;min-width:0}
 .panel>header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--rule)}
 .panel>header h2{font:400 24px/1 var(--display);letter-spacing:.04em;margin:0}
@@ -149,6 +161,11 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
       <div id="fields"></div>
     </section>
 
+    <div class="col">
+    <section class="panel" id="mondayPanel" aria-labelledby="monTitle" hidden>
+      <header><h2 id="monTitle">monday.com ad reads</h2><select id="monEp" aria-label="monday episode"></select></header>
+      <div id="monReads"></div>
+    </section>
     <section class="panel" aria-labelledby="srcTitle">
       <header><h2 id="srcTitle">From YouTube</h2><span class="label" id="srcId"></span></header>
       <div id="source" class="empty">
@@ -161,6 +178,7 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
         </ol>
       </div>
     </section>
+    </div>
   </div>
 </div>
 
@@ -445,6 +463,7 @@ async function generate(){
   state.src = {title:'yt', published:'yt', link:'link', episodeId:'link', episodeNum: state.values.episodeNum ? 'yt':'none', ytShorts: v.short ? 'link' : 'none', ...s};
   $('#asset').value = ''; renderFields(); renderSource(); syncPushBtn(); $('#picks').innerHTML = '';
   // Check Iconik for the channel's usual owners; only replaces the default if nobody has edited it yet.
+  loadMonday(v);
   liveOwners(state.values.channel).then(names => {
     if (!names || state.video !== v || state.src.owningCreator === 'you') return;
     state.values.owningCreator = names; state.src.owningCreator = 'iconik';
@@ -634,7 +653,8 @@ async function pushToIconik(assetOverride){
     const clearedMsg = (a.cleared||[]).length ? ` Cleared ${a.cleared.map(esc).join(' and ')}.` : '';
     const posterMsg = a.poster === 'uploaded' ? ' Poster uploaded.' : /^failed/.test(a.poster||'') ? ` Poster didn’t upload (${esc(a.poster.slice(8))}).` : '';
     const req = (a.missingRequired||[]).length ? ` Still empty in Iconik: ${a.missingRequired.map(esc).join(', ')}, so All Metadata Updated stays off.` : '';
-    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${posterMsg}${clearedMsg}${skipped}${req}`, !!a.skipped.length || /^failed/.test(a.poster||'') || !!req);
+    const monMsg = await pushMonday();
+    setStatusHTML(`Pushed ${a.written.length} fields to <a href="${esc(a.asset.url)}" target="_blank" rel="noopener">${esc(a.asset.title)}</a>.${posterMsg}${clearedMsg}${monMsg}${skipped}${req}`, !!a.skipped.length || /^failed/.test(a.poster||'') || !!req);
   }catch(e){
     setStatus('Iconik push failed: ' + e.message, true);
   }finally{ syncPushBtn(); }
@@ -689,6 +709,89 @@ $('#fields').addEventListener('paste', e => {
   setStatus(placed.length ? `Sorted ${placed.length} link${placed.length>1?'s':''}: ${placed.join(', ')}.` + (unknown.length ? ` Didn’t recognise: ${unknown.join(' ')}` : '') : 'No social links found in that paste.', !placed.length || !!unknown.length);
 });
 renderThumb();
+
+// ── monday.com: tick off the episode's ad reads (link + timestamp + Production Status → Published) ──
+const MONDAY_CHANNELS = ["Talkin' Baseball"];
+const nyDate = (iso) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(iso)).map(x=>[x.type,x.value])); return `${p.year}-${p.month}-${p.day}`; };
+// "1:21:42", "81:42", "01:21:42:15" (editor timecode, frames dropped) → "1:21:42"; anything else stays as typed.
+function cleanTs(t){
+  const parts = String(t||'').trim().split(':').map(Number);
+  if (!parts.length || parts.some(isNaN) || parts.length < 2 || parts.length > 4) return String(t||'').trim();
+  const [h,m,s] = parts.length === 4 ? parts.slice(0,3) : parts.length === 3 ? parts : [0, ...parts];
+  const tot = h*3600 + m*60 + s, H = Math.floor(tot/3600), M = Math.floor(tot%3600/60), S = tot%60;
+  return (H ? H+':'+String(M).padStart(2,'0') : M) + ':' + String(S).padStart(2,'0');
+}
+const SKIP_SALES = /merch graphic|internal promo|unavailable|unsold|inventory/i;
+function readMatchesSponsor(r){
+  const sps = (state.values.sponsor || []).filter(s => !NONE_RE.test(s)).map(squash);
+  const keys = [squash(r.tag), squash(r.name.replace(/\(.*?\)/g,''))].filter(Boolean);
+  return sps.some(s => keys.some(k => k.includes(s) || s.includes(k) || (s.startsWith('fanatics') && k.startsWith('fanatics'))));
+}
+async function loadMonday(v){
+  const panel = $('#mondayPanel');
+  state.monday = null;
+  if (!MONDAY_CHANNELS.includes(state.values.channel)) { panel.hidden = true; return; }
+  panel.hidden = false; $('#monReads').innerHTML = '<div class="monnote">Looking for this episode on the monday board…</div>'; $('#monEp').innerHTML = '';
+  try{
+    const r = await fetch(`${YT_API}/monday/episode?channel=${encodeURIComponent(state.values.channel)}&date=${nyDate(v.publishDate)}`);
+    const d = await r.json();
+    if (state.video !== v) return;
+    if (!r.ok || d.error) throw new Error(d.error || 'HTTP '+r.status);
+    if (!d.episodes.length){ $('#monReads').innerHTML = `<div class="monnote">No episode on the monday board for ${esc(nyDate(v.publishDate))}.</div>`; return; }
+    // Best episode: one already holding this video's link, else the one whose reads match the most sponsors.
+    const score = ep => ep.reads.some(r => r.link.includes(v.id)) ? 100 : ep.reads.filter(readMatchesSponsor).length;
+    d.episodes.sort((a,b) => score(b) - score(a));
+    state.monday = {...d, pick: 0, rows: {}};
+    $('#monEp').innerHTML = d.episodes.map((e,i) => `<option value="${i}">${esc(e.name)}</option>`).join('');
+    renderMonday();
+  }catch(e){ $('#monReads').innerHTML = `<div class="monnote">Couldn’t reach monday (${esc(e.message)}).</div>`; }
+}
+function renderMonday(){
+  const m = state.monday; if (!m) return;
+  const ep = m.episodes[m.pick];
+  $('#monReads').innerHTML = `<div class="monnote">Ticked reads get the YouTube link, the timestamp, and Production Status → Published when you push. <a href="${esc(ep.url)}" target="_blank" rel="noopener">Open in monday</a></div>` +
+    ep.reads.map(r => {
+      const row = m.rows[r.id] ||= (() => {
+        const on = readMatchesSponsor(r) || (!SKIP_SALES.test(r.sales) && r.status !== m.published);
+        const ts = r.ts ? cleanTs(r.ts) : '';
+        return {on, ts, publish: on && (!!ts || r.status === m.published)};
+      })();
+      return `<div class="mread${row.on?'':' off'}" data-id="${esc(r.id)}">
+        <input type="checkbox" data-m="on" ${row.on?'checked':''} aria-label="Update ${esc(r.name)}">
+        <div class="nm">${esc(r.name)}<small>${esc(r.sales||'')} · <span class="pill${r.status===m.published?' pub':''}">${esc(r.status||'No status')}</span></small></div>
+        <input type="text" data-m="ts" value="${esc(row.ts)}" placeholder="Timestamp" aria-label="Timestamp for ${esc(r.name)}">
+        <label class="pub"><input type="checkbox" data-m="publish" ${row.publish?'checked':''}> Published</label>
+      </div>`;
+    }).join('');
+}
+$('#monEp').addEventListener('change', e => { state.monday.pick = +e.target.value; state.monday.rows = {}; renderMonday(); });
+$('#monReads').addEventListener('input', e => {
+  const el = e.target, id = el.closest('.mread')?.dataset.id; if (!id) return;
+  const row = state.monday.rows[id];
+  if (el.dataset.m === 'on'){ row.on = el.checked; el.closest('.mread').classList.toggle('off', !row.on); }
+  if (el.dataset.m === 'publish') row.publish = el.checked;
+  if (el.dataset.m === 'ts'){ row.ts = el.value; if (el.value.trim() && !row.publish){ row.publish = true; el.closest('.mread').querySelector('[data-m=publish]').checked = true; } }
+});
+function mondayUpdates(){
+  const m = state.monday; if (!m) return [];
+  const ep = m.episodes[m.pick], link = `https://youtu.be/${state.video.id}`;
+  // Only send what changes: keep an editor's existing timecode and link, and don't re-publish what's already Published.
+  return ep.reads.filter(r => m.rows[r.id]?.on).map(r => {
+    const row = m.rows[r.id], ts = cleanTs(row.ts);
+    return { id: r.id, link: r.link.includes(state.video.id) ? undefined : link,
+      ts: ts && ts !== cleanTs(r.ts) ? ts : undefined, publish: !!row.publish && r.status !== m.published };
+  }).filter(u => u.link || u.ts || u.publish);
+}
+async function pushMonday(){
+  const updates = mondayUpdates(); if (!updates.length) return '';
+  try{
+    const r = await fetch(`${YT_API}/monday/update`, {method:'POST', headers:{'Content-Type':'application/json','X-Push-Key':getKey()}, body: JSON.stringify({channel: state.values.channel, updates})});
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || 'HTTP '+r.status);
+    const pub = updates.filter(u => u.publish && a.done.includes(u.id)).length;
+    return ` monday: updated ${a.done.length} ad read${a.done.length===1?'':'s'}${pub ? `, ${pub} marked Published` : ''}.` + (a.failed.length ? ` ${a.failed.length} failed (${esc(a.failed[0].why)}).` : '');
+  }catch(e){ return ` monday update failed (${esc(e.message)}).`; }
+}
 $('#picks').addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) pushToIconik(b.dataset.asset); });
 
 renderFields();

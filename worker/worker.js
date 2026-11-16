@@ -343,10 +343,116 @@ async function iconikPush(env, body) {
     missingRequired: missingReq, cleared, poster: poster ? 'uploaded' : posterError ? 'failed: ' + posterError : 'not sent', ...(body.dryRun ? { payload: { metadata_values } } : {}) }, 200];
 }
 
+// ───────────────────────── monday.com ─────────────────────────
+// Secret: MONDAY_TOKEN (a personal API token). Read-only check for now.
+async function mon(env, query, variables = {}) {
+  const r = await fetch('https://api.monday.com/v2', { method: 'POST',
+    headers: { Authorization: env.MONDAY_TOKEN, 'Content-Type': 'application/json', 'API-Version': '2024-10' },
+    body: JSON.stringify({ query, variables }) });
+  const d = await r.json();
+  if (!r.ok || d.errors || d.error_message) throw new Error('monday: ' + JSON.stringify(d.errors || d.error_message || d).slice(0, 300));
+  return d.data;
+}
+// Ad-read boards by channel. Episodes are items; each ad read is a subitem with YT Link, Timestamp, Production Status.
+const MONDAY_BOARDS = {
+  "Talkin' Baseball": { board: '7655278256', itemDate: 'dup__of_recording_date6__1',
+    sub: { link: 'text__1', ts: 'text8__1', status: 'status__1', date: 'dup__of_publish_date7__1', tag: 'tags__1', sales: 'status' },
+    published: 'Published' },
+};
+const dayOf = (t) => (String(t || '').match(/\d{4}-\d{2}-\d{2}/) || [''])[0];
+
+// Episode(s) on the board for a publish date, with their ad-read subitems.
+async function mondayEpisode(env, channel, date) {
+  const cfg = MONDAY_BOARDS[channel];
+  if (!cfg) return { supported: false };
+  if (!env.MONDAY_TOKEN) return { supported: true, error: 'MONDAY_TOKEN is not set' };
+  // Only that year's groups ("2026 Standard", "2026 TPP's"), and only the columns we use: keeps it to a second or two.
+  const S0 = cfg.sub, subCols = JSON.stringify([S0.link, S0.ts, S0.status, S0.date, S0.tag, S0.sales]);
+  const gq = await mon(env, `query($ids:[ID!]){ boards(ids:$ids){ groups{ id title } } }`, { ids: [cfg.board] });
+  const year = date.slice(0, 4);
+  let groups = gq.boards[0].groups.filter((g) => g.title.includes(year));
+  if (!groups.length) groups = gq.boards[0].groups;
+  const items = [];
+  await Promise.all(groups.map(async (g) => {
+    const d = await mon(env, `query($ids:[ID!], $g:[String]){ boards(ids:$ids){ groups(ids:$g){ title items_page(limit:500){ items{ id name
+      column_values(ids:["${cfg.itemDate}"]){ id text } subitems{ id name column_values(ids:${subCols}){ id text } } } } } } }`, { ids: [cfg.board], g: [g.id] });
+    for (const it of d.boards[0].groups[0].items_page.items) items.push({ ...it, group: { title: g.title } });
+  }));
+  const S = cfg.sub;
+  const val = (cols, id) => (cols.find((c) => c.id === id) || {}).text || '';
+  const episodes = items.filter((it) => dayOf(val(it.column_values, cfg.itemDate)) === date || it.subitems.some((s) => dayOf(val(s.column_values, S.date)) === date))
+    .map((it) => ({ id: it.id, name: it.name, group: it.group.title, url: `https://jomboymedia.monday.com/boards/${cfg.board}/pulses/${it.id}`,
+      reads: it.subitems.map((s) => ({ id: s.id, name: s.name, tag: val(s.column_values, S.tag), sales: val(s.column_values, S.sales),
+        status: val(s.column_values, S.status), link: val(s.column_values, S.link), ts: val(s.column_values, S.ts) })) }));
+  return { supported: true, board: cfg.board, published: cfg.published, episodes };
+}
+
+// Writes link + timestamp on each ad read, and Production Status → Published where asked.
+async function mondayUpdate(env, channel, updates) {
+  const cfg = MONDAY_BOARDS[channel];
+  if (!cfg) throw new Error('No monday board for ' + channel);
+  const S = cfg.sub, done = [], failed = [];
+  for (const u of updates || []) {
+    const cv = {};
+    if (u.link) cv[S.link] = String(u.link);
+    if (u.ts) cv[S.ts] = String(u.ts);
+    if (u.publish) cv[S.status] = { label: cfg.published };
+    if (!Object.keys(cv).length) continue;
+    try {
+      // Subitems live on their own board; monday finds it from the item id when board_id is the subitem board.
+      const b = await mon(env, `query($id:[ID!]){ items(ids:$id){ board{ id } } }`, { id: [String(u.id)] });
+      await mon(env, `mutation($b:ID!, $i:ID!, $v:JSON!){ change_multiple_column_values(board_id:$b, item_id:$i, column_values:$v){ id } }`,
+        { b: b.items[0].board.id, i: String(u.id), v: JSON.stringify(cv) });
+      done.push(u.id);
+    } catch (e) { failed.push({ id: u.id, why: String(e.message).slice(0, 200) }); }
+  }
+  return { done, failed };
+}
+
+async function mondayCheck(env, boardId) {
+  if (!env.MONDAY_TOKEN) return { ready: false, why: 'MONDAY_TOKEN is not set' };
+  if (boardId) {
+    const d = await mon(env, `query($ids:[ID!]){ boards(ids:$ids){ id name items_count groups{ id title } columns{ id title type settings_str }
+      items_page(limit:8){ items{ id name group{ title } column_values{ id text } subitems{ id name column_values{ id text } } } } } }`, { ids: [String(boardId)] });
+    const b = d.boards[0];
+    const sub = (b.items_page.items.find((i) => i.subitems.length) || {}).subitems?.[0];
+    if (sub) {
+      const s = await mon(env, `query($id:[ID!]){ items(ids:$id){ board{ id name columns{ id title type settings_str } } } }`, { id: [sub.id] });
+      b.subitemBoard = s.items[0].board;
+    }
+    // Newest episodes: the group most recently added to, last items first.
+    const g = await mon(env, `query($ids:[ID!]){ boards(ids:$ids){ groups{ title items_page(limit:100){ items{ id name created_at column_values{ id text } subitems{ id name column_values{ id text } } } } } } }`, { ids: [String(boardId)] });
+    const all = g.boards[0].groups.flatMap((gr) => gr.items_page.items.map((i) => ({ ...i, group: gr.title })));
+    all.sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
+    b.newest = all.slice(0, 6);
+    return b;
+  }
+  const d = await mon(env, `{ me { name account { name } } boards(limit:200, order_by:used_at){ id name workspace{ name } } }`);
+  return { ready: true, me: d.me.name, account: d.me.account.name,
+    boards: d.boards.filter((b) => /ad|read|sponsor|partner|brand|integrat|talkin|production/i.test(b.name)).map((b) => `${b.id} · ${b.name} · ${(b.workspace || {}).name || ''}`) };
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === '/monday/episode' || url.pathname === '/monday/update') {
+      const origin = request.headers.get('Origin');
+      if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
+      try {
+        if (url.pathname === '/monday/episode') { const r = json(await mondayEpisode(env, url.searchParams.get('channel'), url.searchParams.get('date'))); r.headers.set('Cache-Control', 'no-store'); return r; }
+        if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+        if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
+        const body = await request.json();
+        const r = json(await mondayUpdate(env, body.channel, body.updates)); r.headers.set('Cache-Control', 'no-store'); return r;
+      } catch (e) { return json({ error: String(e && e.message || e) }, 502); }
+    }
+    if (url.pathname === '/monday/check') {
+      const origin = request.headers.get('Origin');
+      if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
+      try { const r = json(await mondayCheck(env, url.searchParams.get('board'))); r.headers.set('Cache-Control', 'no-store'); return r; }
+      catch (e) { return json({ error: String(e && e.message || e) }, 502); }
+    }
     if (url.pathname.startsWith('/iconik/')) {
       const origin = request.headers.get('Origin');
       if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
