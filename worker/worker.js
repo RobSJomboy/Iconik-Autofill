@@ -518,10 +518,17 @@ async function mondayCheck(env, boardId) {
     boards: d.boards.filter((b) => /ad|read|sponsor|partner|brand|integrat|talkin|production/i.test(b.name)).map((b) => `${b.id} · ${b.name} · ${(b.workspace || {}).name || ''}`) };
 }
 
+
+const INFO_PAGE = (title, body) => new Response(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px;color:#1a1a1a}h1{font-size:26px}</style><h1>${title}</h1>${body}`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+const HOME_HTML = `<p>Iconik Autofill is an internal Jomboy Media production tool. Producers paste a YouTube link from one of our own channels and it fills in the asset's Iconik metadata, and checks off sponsored ad reads on our monday.com boards.</p><p>The tool lives at <a href="https://robsjomboy.github.io/Iconik-Autofill/">robsjomboy.github.io/Iconik-Autofill</a>. See the <a href="/privacy">privacy policy</a>.</p>`;
+const PRIVACY_HTML = `<p>Iconik Autofill is an internal tool used by Jomboy Media staff.</p><p><b>What it accesses.</b> When a Jomboy Media channel manager connects a YouTube channel, the tool reads that channel's video caption tracks (YouTube scope youtube.force-ssl) so it can find where sponsor names are mentioned in our own videos. It does not upload, edit or delete anything on YouTube.</p><p><b>What it stores.</b> Only the channel's ID, name and a refresh token, kept in encrypted Cloudflare storage so the connection keeps working. Caption text is processed on the fly and not stored.</p><p><b>Sharing.</b> Nothing is sold or shared with third parties. Results are written only to Jomboy Media's own Iconik and monday.com workspaces.</p><p><b>Removing access.</b> Revoke it anytime at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, and the stored token stops working.</p><p>Questions: contact Jomboy Media.</p>`;
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === '/' ) return INFO_PAGE('Iconik Autofill', HOME_HTML);
+    if (url.pathname === '/privacy') return INFO_PAGE('Iconik Autofill · Privacy Policy', PRIVACY_HTML);
     if (url.pathname === '/yt/connect') return ytConnect(env);
     if (url.pathname === '/yt/callback') return ytCallback(env, url);
     if (url.pathname === '/yt/ads' && request.method === 'POST') {
