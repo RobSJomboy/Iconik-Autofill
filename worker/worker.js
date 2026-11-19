@@ -6,6 +6,7 @@
  *                      (Workers AI; it may only answer with values that exist in `lists`)
  *   GET  /iconik/check → is the Iconik token set, which view it found, how each page field maps to it
  *   POST /iconik/push  { asset?, videoId, title, values, publishedIso, dryRun? } → writes the metadata view on one asset
+ *   POST /iconik/upload/start|finish → new asset in a collection; the caller uploads the bytes to the returned URL
  *                      (no asset → searches Iconik by title; one hit is written, several come back as `pick`)
  *
  * Browsers can't read YouTube's data directly (CORS), so this asks YouTube's player endpoint
@@ -269,6 +270,47 @@ async function uploadPoster(env, assetId, t) {
     log('after', { keyframes: (all.objects || []).map((k) => ({ id: k.id.slice(0, 8), type: k.type, status: k.status, custom: k.is_custom_keyframe, created: k.date_created })) });
   } catch (e) { log('list-failed', { error: String(e.message).slice(0, 200) }); }
   return { id: kf.id, bytes: img.bytes.length };
+}
+
+// ── New-file upload (the Companion "PUSH TO ICONIK" button) ──
+// The Mac never holds Iconik credentials: the worker makes the asset + file records and hands back a pre-signed
+// upload URL, the Mac sends the bytes straight to Iconik's storage, then /upload/finish closes the file and starts proxies.
+//   POST /iconik/upload/start  { collection, filename, size, title? } → { assetId, fileId, assetUrl, upload_url, upload_method, upload_headers }
+//   POST /iconik/upload/finish { assetId, fileId }                     → { ok, transcode }
+const MIME = { mp4: 'video/mp4', mov: 'video/quicktime', mxf: 'application/mxf', mp3: 'audio/mpeg', wav: 'audio/wav' };
+async function uploadStart(env, b) {
+  const cid = assetIdFrom(b.collection);
+  const name = String(b.filename || '').trim(), size = Number(b.size);
+  if (!cid) throw new Error('collection id missing');
+  if (!name || !(size > 0)) throw new Error('filename and size are required');
+  const title = String(b.title || name.replace(/\.[^.]+$/, ''));
+  const mime = MIME[(name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+  const st = await ik(env, '/files/v1/storages/matching/FILES/');
+  const storage = (st.objects && st.objects[0]) || st;
+  if (!storage || !storage.id) throw new Error('Iconik has no default FILES storage for this token: ' + JSON.stringify(st).slice(0, 200));
+  const asset = await ik(env, '/assets/v1/assets/', { method: 'POST', body: JSON.stringify({ title, type: 'ASSET' }) });
+  await ik(env, `/assets/v1/collections/${cid}/contents/`, { method: 'POST', body: JSON.stringify({ object_id: asset.id, object_type: 'assets' }) });
+  const fmt = await ik(env, `/files/v1/assets/${asset.id}/formats/`, { method: 'POST',
+    body: JSON.stringify({ name: 'ORIGINAL', storage_methods: [storage.method], metadata: [{ internet_media_type: mime }] }) });
+  const fs = await ik(env, `/files/v1/assets/${asset.id}/file_sets/`, { method: 'POST',
+    body: JSON.stringify({ format_id: fmt.id, storage_id: storage.id, base_dir: '/', name, component_ids: [] }) });
+  const now = new Date().toISOString();
+  const file = await ik(env, `/files/v1/assets/${asset.id}/files/`, { method: 'POST',
+    body: JSON.stringify({ original_name: name, directory_path: '', file_set_id: fs.id, format_id: fmt.id, storage_id: storage.id,
+      size, type: 'FILE', file_date_created: now, file_date_modified: now }) });
+  if (!file.upload_url) throw new Error('Iconik gave no upload URL: ' + JSON.stringify(file).slice(0, 200));
+  console.log(JSON.stringify({ upload: 'start', asset: asset.id, file: file.id, method: file.upload_method || storage.method, size }));
+  return { assetId: asset.id, fileId: file.id, assetUrl: `https://app.iconik.io/asset/${asset.id}`, mime,
+    upload_url: file.upload_url, upload_method: file.upload_method || storage.method, upload_headers: file.upload_headers || {} };
+}
+async function uploadFinish(env, b) {
+  const a = assetIdFrom(b.assetId), f = assetIdFrom(b.fileId);
+  if (!a || !f) throw new Error('assetId and fileId are required');
+  await ik(env, `/files/v1/assets/${a}/files/${f}/`, { method: 'PATCH', body: JSON.stringify({ status: 'CLOSED', progress_processed: 100 }) });
+  let transcode = 'started';
+  try { await ik(env, `/files/v1/assets/${a}/files/${f}/keyframes/`, { method: 'POST', body: '{}' }); }
+  catch (e) { transcode = 'not started: ' + String(e.message).slice(0, 200); }
+  return { ok: true, assetUrl: `https://app.iconik.io/asset/${a}`, transcode };
 }
 
 // Who usually owns each channel, learned from assets already tagged in Iconik (facet counts, read-only).
@@ -594,6 +636,11 @@ export default {
       try {
         if (url.pathname === '/iconik/channel-owners') { const r = json(await channelOwners(env, url.searchParams.get('channel'))); r.headers.set('Cache-Control', 'no-store'); return r; }
         if (url.pathname === '/iconik/check') { const r = json(await iconikCheck(env)); r.headers.set('Cache-Control', 'no-store'); return r; }
+        if ((url.pathname === '/iconik/upload/start' || url.pathname === '/iconik/upload/finish') && request.method === 'POST') {
+          if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
+          const b = await request.json();
+          const r = json(url.pathname.endsWith('start') ? await uploadStart(env, b) : await uploadFinish(env, b)); r.headers.set('Cache-Control', 'no-store'); return r;
+        }
         if (url.pathname === '/iconik/push' && request.method === 'POST') {
           if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
           const [b, st] = await iconikPush(env, await request.json());
