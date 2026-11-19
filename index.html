@@ -832,7 +832,24 @@ async function pushMonday(){
 $('#picks').addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) pushToIconik(b.dataset.asset); });
 
 renderFields();
-loadLists();
+const listsLoaded = loadLists();
+
+// Deep link (used by the Stream Deck "PUSH TO ICONIK" button):
+//   ?yt=<YouTube link>&asset=<Iconik asset link>&auto=1  → fills the link, runs Generate, then Push to Iconik.
+// Without auto=1 it stops after Generate so you can check the picks. The params are cleared so a reload won't push twice.
+(async function deepLink(){
+  const q = new URLSearchParams(location.search), yt = q.get('yt');
+  if (!yt) return;
+  history.replaceState(null, '', location.pathname);
+  try{ await listsLoaded; }catch{}
+  $('#url').value = yt;
+  await generate();
+  const asset = q.get('asset') || '';
+  if (asset) $('#asset').value = asset;
+  if (q.get('auto') !== '1' || !state.video) return;
+  await new Promise(r => setTimeout(r, 4000));   // let the channel-owner and monday lookups land first
+  await pushToIconik(asset || undefined);
+})();
 </script>
 </body>
 </html>
