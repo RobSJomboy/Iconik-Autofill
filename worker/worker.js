@@ -132,6 +132,7 @@ const FIELD_LABELS = {
   ytShorts: 'YouTube Shorts Link', facebook: 'Facebook Link', instagram: 'Instagram Link', twitter: 'Twitter Link',
   tiktok: 'TikTok Link', linkedin: 'LinkedIn Link',
   channel: 'Channel', owningCreator: 'Owning Creator', guestCreator: 'Guest Creator',
+  series: 'Series', producer: 'Producer', editor: 'Editor',
   metaDone: 'All Metadata Updated?', thumbDone: 'Thumbnails Uploaded?',
 };
 // Toggles the worker sets itself; the page never sends them.
@@ -338,13 +339,83 @@ async function channelOwners(env, only) {
   return out;
 }
 
+
+// ── Learned channel profile: what people actually tagged on this channel's recent uploads in Iconik ──
+// Only assets someone finished ("All Metadata Updated?" on) count, so half-done uploads teach it nothing.
+// Refreshed every 6 hours, so new uploads from anyone on the team keep teaching it.
+const LEARN_FIELDS = ['OwningCreater', 'GuestCreator', 'TopTags', 'Series', 'Producer', 'Editor', 'League2', 'MLBFootage'];
+const STOP = new Set('the and for with from this that what who how why are was were his her its our your you they them their into over just not but all any can has have had will about after before more most less very than then when where which while out off one get got new episode full'.split(' '));
+const words = (t) => [...new Set(String(t || '').toLowerCase().replace(/[’']/g, '').split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w)))];
+const asList = (v) => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(String);
+const vtGroup = (v) => /short/i.test(v) ? 'short' : /live/i.test(v) ? 'live' : 'long';
+
+async function channelProfile(env, channel, fresh) {
+  const key = 'prof2:' + sq(channel);
+  if (!fresh && env.YT_AUTH) { const c = await env.YT_AUTH.get(key, 'json'); if (c && Date.now() - c.at < 6 * 3600e3) return c; }
+  const objs = [];
+  for (let page = 1; page <= 3; page++) {
+    const r = await ik(env, `/search/v1/search/?per_page=100&page=${page}&generate_signed_url=false`, { method: 'POST', body: JSON.stringify({
+      doc_types: ['assets'], include_fields: ['id', 'title', 'metadata.Title', 'metadata.VideoType', ...LEARN_FIELDS.map((f) => 'metadata.' + f)],
+      sort: [{ name: 'date_created', order: 'desc' }],
+      filter: { operator: 'AND', terms: [{ name: 'metadata.Channel', value_in: [channel] }, { name: 'metadata.FinalMetadataUpdated', value_in: ['true'] }] } }) });
+    objs.push(...(r.objects || []));
+    if ((r.objects || []).length < 100) break;
+  }
+  // Tags are free text in Iconik ("MLB" and "mlb" both exist): fold case, keep the most used spelling.
+  const spell = {};
+  for (const o of objs) for (const t of asList((o.metadata || {}).TopTags)) { const k = t.toLowerCase().trim(); (spell[k] ||= {})[t] = (spell[k][t] || 0) + 1; }
+  const tagName = (t) => { const c = spell[t.toLowerCase().trim()]; return c ? Object.entries(c).sort((x, y) => y[1] - x[1])[0][0] : t; };
+  const rows = objs.map((o) => {
+    const m = o.metadata || {}, f = {};
+    for (const k of LEARN_FIELDS) { const v = asList(m[k]); if (v.length) f[k] = k === 'TopTags' ? [...new Set(v.map(tagName))] : v; }
+    return { w: words(asList(m.Title)[0] || o.title), vt: vtGroup(asList(m.VideoType)[0] || ''), f };
+  });
+  const out = { channel, at: Date.now(), n: rows.length, rows };
+  if (env.YT_AUTH) await env.YT_AUTH.put(key, JSON.stringify(out), { expirationTtl: 7 * 86400 });
+  return out;
+}
+
+// Predict a new upload's fields from the past uploads most like it: same kind (Short / Longform / Live),
+// weighted by the title words they share (rare words count more). Only values most of them agree on come back.
+async function learnPredict(env, b) {
+  const prof = await channelProfile(env, b.channel || '');
+  const vt = vtGroup(b.videoType || ''), mine = words(b.title);
+  let pool = prof.rows.filter((r) => r.vt === vt);
+  if (pool.length < 6) pool = prof.rows;
+  if (!pool.length) return { channel: prof.channel, n: 0, picks: {} };
+  const df = {}; for (const r of pool) for (const w of r.w) df[w] = (df[w] || 0) + 1;
+  const idf = (w) => Math.log((pool.length + 1) / ((df[w] || 0) + 1));
+  const scored = pool.map((r) => ({ r, s: mine.filter((w) => r.w.includes(w)).reduce((a, w) => a + idf(w), 0) })).sort((x, y) => y.s - x.s);
+  // Close matches: within half the best score. Too few close matches → fall back to every upload of this kind.
+  const best = scored[0].s, close = best > 1.5 ? scored.filter((x) => x.s >= best * 0.5).slice(0, 20) : [];
+  const near = close.length >= 4 ? close : scored;
+  const shared = close.length >= 4 ? [...new Set(close.flatMap((x) => mine.filter((w) => x.r.w.includes(w) && idf(w) > 1)))].slice(0, 4) : [];
+  const picks = {};
+  for (const k of LEARN_FIELDS) {
+    const c = {}; let had = 0;
+    for (const { r } of near) { const v = r.f[k]; if (!v) continue; had++; for (const x of v) c[x] = (c[x] || 0) + 1; }
+    if (had < 3) continue;
+    const cut = k === 'TopTags' ? 0.5 : 0.6;
+    let vals = Object.entries(c).filter(([, n]) => n / had >= cut).sort((x, y) => y[1] - x[1]);
+    // Specific tags (a team, a player) only when this title names them; the show's everyday tags always pass.
+    if (k === 'TopTags') {
+      const t = String(b.title || '').toLowerCase(), every = {};
+      for (const r of pool) for (const x of r.f.TopTags || []) every[x] = (every[x] || 0) + 1;
+      const tagged = pool.filter((r) => r.f.TopTags).length || 1;
+      vals = vals.filter(([v]) => every[v] / tagged >= 0.3 || words(v).some((w) => w.length >= 4 && t.includes(w)));
+    }
+    if (vals.length) picks[k] = { values: vals.map(([v]) => v), agree: vals[0][1], of: had };
+  }
+  return { channel: prof.channel, n: prof.n, kind: vt, matched: near.length, like: shared, picks };
+}
+
 async function iconikCheck(env) {
   if (!env.ICONIK_APP_ID || !env.ICONIK_AUTH_TOKEN) return { ready: false, why: 'ICONIK_APP_ID / ICONIK_AUTH_TOKEN are not set on the worker yet.' };
   const view = await getView(env);
   const m = mapFields(view);
   return { ready: true, view: { id: view.id, name: view.name }, needsKey: !!env.PUSH_KEY,
     fields: Object.fromEntries(Object.entries(m).map(([k, f]) => [k, f ? { name: f.name, label: f.label, type: f.field_type, multi: !!f.multi, options: (f.options || []).length } : null])),
-    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type, required: !!f.required, multi: !!f.multi, ...(/warning|creator|channel|series/i.test(f.label || '') ? { options: f.options || [] } : {}) })) };
+    allFields: (view.view_fields || []).map((f) => ({ name: f.name, label: f.label, type: f.field_type, required: !!f.required, multi: !!f.multi, ...(/warning|creator|channel|series|producer|editor/i.test(f.label || '') ? { options: f.options || [] } : {}) })) };
 }
 
 async function iconikPush(env, body) {
@@ -635,6 +706,7 @@ export default {
       if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
       try {
         if (url.pathname === '/iconik/channel-owners') { const r = json(await channelOwners(env, url.searchParams.get('channel'))); r.headers.set('Cache-Control', 'no-store'); return r; }
+        if (url.pathname === '/iconik/learn' && request.method === 'POST') { const r = json(await learnPredict(env, await request.json())); r.headers.set('Cache-Control', 'no-store'); return r; }
         if (url.pathname === '/iconik/check') { const r = json(await iconikCheck(env)); r.headers.set('Cache-Control', 'no-store'); return r; }
         if ((url.pathname === '/iconik/upload/start' || url.pathname === '/iconik/upload/finish') && request.method === 'POST') {
           if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Push key missing or wrong.', needsKey: true }, 401);
