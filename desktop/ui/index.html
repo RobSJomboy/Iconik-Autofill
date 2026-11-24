@@ -872,7 +872,7 @@ function updateBadge() {
 }
 
 /* ---------- job cards ---------- */
-const STEPN = {fetching: 0, claiming: 0, uploaded: 2, uploading: 0, waiting: 1, pick: 1, needlink: 1, captions: 1, filling: 2, done: 3};
+const STEPN = {queued: 2, fetching: 0, claiming: 0, uploaded: 2, uploading: 0, waiting: 1, pick: 1, needlink: 1, captions: 1, filling: 2, done: 3};
 function paintJobs() {
   const el = $('#jobs'); if (!el) return;
   if (!JOBS.length) { el.innerHTML = '<div class="empty">Nothing pushed yet.<br>Your uploads and their progress show up here.</div>'; return; }
@@ -889,6 +889,8 @@ function paintJobs() {
     };
     let msg = '', acts = [], extra = '';
     switch (j.state) {
+      case 'queued':
+        msg = '<span class="muted">Waiting its turn to fill metadata…</span>'; acts.push(`<button class="small" data-a="cancelfetch">Cancel</button>`); break;
       case 'fetching': case 'claiming':
         msg = `<span class="spinner"></span> Waiting for the download. In YouTube Studio click <b>⋮ → Download</b>. It gets picked up from <code>${esc(CFG.watchFolder || '~/Downloads')}</code>.`;
         acts.push(`<button class="small" data-a="studio">Open in Studio</button>`, `<button class="small" data-a="havefile">I have the file</button>`, `<button class="small" data-a="cancelfetch">Cancel</button>`); break;
@@ -1030,7 +1032,7 @@ async function checkUpdate() {
 /* =====================================================================
    FIND MISSING VIDEOS: what's on a channel's YouTube but not in Iconik → download from Studio → upload + fill
    ===================================================================== */
-let MISS = {channel: '', folder: '', list: null, filter: 'missing', kind: 'all', limit: 60, picked: new Set(), loading: false, err: ''};
+let MISS = {channel: '', folder: '', source: 'uploads', playlists: [], list: null, filter: 'missing', kind: 'all', limit: 60, picked: new Set(), loading: false, err: ''};
 const studioUrl = (id) => `https://studio.youtube.com/video/${id}/edit`;
 function openMissing() {
   $('#cols').classList.add('hidden'); $('#missingView').classList.remove('hidden');
@@ -1045,15 +1047,16 @@ async function loadMissing() {
     const info = await ensureShow(MISS.channel);
     if (!info.youtube) throw new Error(`No YouTube channel is set for ${MISS.channel}. Set it in Setup → Timecodes & monday.`);
     MISS.yt = info.youtube;
-    const r = await api(`/app/missing?channel=${encodeURIComponent(MISS.channel)}&yt=${info.youtube.id}&limit=${MISS.limit}`);
-    MISS.list = r.videos; MISS.signedIn = r.signedIn;
+    const chan = (FOLDERS || []).find(c => c.title === MISS.channel);
+    const r = await api(`/app/missing?channel=${encodeURIComponent(MISS.channel)}&yt=${info.youtube.id}&limit=${MISS.limit}&source=${encodeURIComponent(MISS.source)}&cid=${chan ? chan.id : ''}`);
+    MISS.list = r.videos; MISS.signedIn = r.signedIn; MISS.playlists = r.playlists || [];
   } catch (e) { MISS.err = e.message; }
   MISS.loading = false; paintMissing();
 }
 function missStatus(v) {
   const j = JOBS.find(x => x.ytVideo && x.ytVideo.id === v.id && !['error', 'cancelled'].includes(x.state));
   if (j) return j.state === 'done' ? 'in' : 'working';
-  return v.inIconik ? 'in' : v.maybe ? 'maybe' : v.live !== 'none' ? 'live' : 'missing';
+  return v.inIconik ? (v.inIconik.metaDone === false ? 'needs' : 'in') : v.maybe ? 'needs' : v.live !== 'none' ? 'live' : 'missing';
 }
 function paintMissing() {
   const el = $('#missingView'); if (el.classList.contains('hidden')) return;
@@ -1068,6 +1071,7 @@ function paintMissing() {
       <div class="mbar" style="margin:0">
         <label class="muted" style="font-size:12px">Channel <select id="mChan" style="margin-left:6px"><option value="">Pick a channel…</option>${(FOLDERS || []).map(c => `<option ${c.title === MISS.channel ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select></label>
         <label class="muted" style="font-size:12px">Upload into <select id="mFolder" style="margin-left:6px">${chan ? `<option value="${chan.id}">${esc(chan.title)} (channel folder${chan.series.some(x => /^shorts?$/i.test(x.title)) ? '; Shorts go to Short' : ''})</option>${chan.series.map(x => `<option value="${x.id}" ${x.id === MISS.folder ? 'selected' : ''}>${esc(chan.title)} › ${esc(x.title)}</option>`).join('')}` : ''}</select></label>
+        <label class="muted" style="font-size:12px">Look at <select id="mSource" style="margin-left:6px"><option value="uploads" ${MISS.source === 'uploads' ? 'selected' : ''}>All uploads</option><option value="live" ${MISS.source === 'live' ? 'selected' : ''}>Past live streams</option>${MISS.playlists.map(p => `<option value="${esc(p.id)}" ${MISS.source === p.id ? 'selected' : ''}>Playlist: ${esc(p.title)} (${p.count})</option>`).join('')}</select></label>
         <button class="small" id="mReload" ${MISS.channel ? '' : 'disabled'}>Check again</button>
       </div>
       <div class="faint" style="font-size:12px;margin-top:10px">Watching <code>${esc(CFG.watchFolder)}</code> for downloads <button class="link small" id="mWatch">change</button> · moving them to <code>${esc(CFG.fetchFolder)}</code> <button class="link small" id="mFetch">change</button></div>
@@ -1076,20 +1080,22 @@ function paintMissing() {
     ${MISS.err ? `<div class="empty bad">${esc(MISS.err)}</div>` : ''}
     ${MISS.list ? `
       <div class="mbar">
-        <div class="chips small">${[['missing', 'Missing'], ['maybe', 'Maybe in Iconik'], ['in', 'In Iconik'], ['working', 'In progress'], ['all', 'All']].map(([k, n]) => `<button class="chip ${MISS.filter === k ? 'on' : ''}" data-f="${k}">${n}${k === 'all' ? '' : ' · ' + count(k)}</button>`).join('')}</div>
+        <div class="chips small">${[['missing', 'Missing'], ['needs', 'In Iconik, needs metadata'], ['in', 'In Iconik, done'], ['working', 'In progress'], ['all', 'All']].map(([k, n]) => `<button class="chip ${MISS.filter === k ? 'on' : ''}" data-f="${k}">${n}${k === 'all' ? '' : ' · ' + count(k)}</button>`).join('')}</div>
         <div class="chips small">${[['all', 'Everything'], ['long', 'Longform'], ['short', 'Shorts']].map(([k, n]) => `<button class="chip ${MISS.kind === k ? 'on' : ''}" data-k="${k}">${n}</button>`).join('')}</div>
         <div class="grow"></div>
-        ${MISS.picked.size ? `<button class="gold small" id="mGetSel">Get ${MISS.picked.size} selected</button>` : ''}
+        ${shown.some(v => ['missing', 'needs'].includes(missStatus(v))) ? `<button class="small" id="mAll">Select all ${MISS.filter === 'needs' ? 'that need metadata' : MISS.filter === 'missing' ? 'missing' : ''}</button>` : ''}
+        ${MISS.picked.size ? `<button class="gold small" id="mGetSel">${pickLabel()}</button>` : ''}
       </div>
       ${MISS.signedIn ? '' : '<p class="faint" style="font-size:12px;margin:0 0 10px">This channel isn’t connected, so scheduled and private uploads aren’t listed.</p>'}
       ${shown.map(v => { const st = missStatus(v);
         return `<div class="mrow" data-id="${v.id}">
-          ${st === 'missing' ? `<input type="checkbox" data-pick ${MISS.picked.has(v.id) ? 'checked' : ''}>` : '<span></span>'}
+          ${st === 'missing' || st === 'needs' ? `<input type="checkbox" data-pick ${MISS.picked.has(v.id) ? 'checked' : ''}>` : '<span></span>'}
           <img src="${esc(v.thumb)}" loading="lazy">
           <div><div class="mt">${esc(v.title)}</div><div class="mm">${v.scheduled ? 'Scheduled ' + new Date(v.publishAt).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}) : ago(Date.parse(v.published))} · ${fmtDur(v.seconds)}${v.seconds <= 180 ? ' · Short' : ''}${v.wasLive ? ' · was live' : ''}${v.privacy !== 'public' ? ' · ' + v.privacy : ''}
-            ${st === 'maybe' ? `<br><span class="warn">An Iconik asset has this title but isn’t linked to the video: “${esc(v.maybe.title)}”</span>` : ''}</div></div>
+            ${st === 'needs' && v.inIconik ? `<br><span class="warn">In Iconik, but the metadata was never finished.</span>` : ''}
+            ${st === 'needs' && v.maybe ? `<br><span class="warn">Iconik has an asset with the ${v.maybe.why === 'same length' ? 'same length' : 'same title'} that isn’t linked to this video: “${esc(v.maybe.title)}”</span>` : ''}</div></div>
           <div class="ma">${st === 'in' ? `<span class="pill ok">✓ In Iconik</span><button class="small" data-open="${esc(v.inIconik ? v.inIconik.url : ((JOBS.find(x => x.ytVideo && x.ytVideo.id === v.id && x.state === 'done') || {}).assetUrl || ''))}">Open</button>`
-            : st === 'maybe' ? `<button class="small gold" data-fillasset>Fill that asset</button><button class="small" data-open="${esc(v.maybe.url)}">Open</button><button class="small" data-get>Download anyway</button>`
+            : st === 'needs' ? `<button class="small gold" data-fillasset>Fill metadata</button><button class="small" data-open="${esc((v.inIconik || v.maybe).url)}">Open</button>${v.maybe ? '<button class="small" data-get>Not it: download</button>' : ''}`
             : st === 'working' ? '<span class="pill">In progress: see Pushes</span>'
             : st === 'live' ? '<span class="pill">Live / upcoming</span>'
             : `<button class="small gold" data-get>Get it</button>`}
@@ -1105,7 +1111,11 @@ function paintMissing() {
   $$('[data-f]', el).forEach(b => b.onclick = () => { MISS.filter = b.dataset.f; paintMissing(); });
   $$('[data-k]', el).forEach(b => b.onclick = () => { MISS.kind = b.dataset.k; paintMissing(); });
   const more = $('#mMore'); if (more) more.onclick = () => { MISS.limit += 60; loadMissing(); };
-  const gs = $('#mGetSel'); if (gs) gs.onclick = () => { const vids = MISS.list.filter(v => MISS.picked.has(v.id)); MISS.picked.clear(); getVideos(vids); };
+  const gs = $('#mGetSel'); if (gs) gs.onclick = () => { const vids = MISS.list.filter(v => MISS.picked.has(v.id)); MISS.picked.clear();
+    const get = vids.filter(v => missStatus(v) === 'missing'), fillv = vids.filter(v => missStatus(v) === 'needs');
+    if (get.length) getVideos(get); fillv.forEach(v => fillExisting(v, true)); if (fillv.length) { toast(`Filling ${fillv.length} in Iconik, one at a time.`); runFillQueue(); } paintMissing(); };
+  const ma = $('#mAll'); if (ma) ma.onclick = () => { shown.filter(v => ['missing', 'needs'].includes(missStatus(v))).forEach(v => MISS.picked.add(v.id)); paintMissing(); };
+  $('#mSource').onchange = (e) => { MISS.source = e.target.value; MISS.limit = 60; loadMissing(); };
   $$('.mrow', el).forEach(row => {
     const v = MISS.list.find(x => x.id === row.dataset.id);
     $$('[data-open]', row).forEach(b => b.onclick = () => native('open', {url: b.dataset.open}));
@@ -1130,10 +1140,26 @@ function getVideos(vids) {
   saveJobs(); paintMissing(); watchDownloads();
   toast(vids.length > 1 ? `Opened ${vids.length} videos in YouTube Studio. On each, click ⋮ → Download.` : 'Opened YouTube Studio. Click ⋮ (top right) → Download.');
 }
-// An untagged asset with the same title: just run Autofill on it.
-function fillExisting(v) {
-  const j = {...fetchJob(v), kind: 'fill', state: 'uploaded', assetUrl: v.maybe.url, assetId: v.maybe.id, name: v.maybe.title};
-  JOBS.unshift(j); fill(j, true); paintMissing();
+// Already in Iconik without finished metadata: run Autofill on that asset with this video.
+function fillExisting(v, queued) {
+  const asset = v.inIconik || v.maybe;
+  const j = {...fetchJob(v), kind: 'fill', state: queued ? 'queued' : 'uploaded', assetUrl: asset.url, assetId: asset.id, name: asset.title || v.title,
+    match: {why: v.inIconik ? 'already linked in Iconik' : 'Iconik asset with the ' + (v.maybe.why || 'same title')}};
+  JOBS.unshift(j);
+  if (!queued) fill(j, true);
+  saveJobs(); paintJobs();
+}
+// Bulk fills run one Autofill window at a time.
+function runFillQueue() {
+  if (JOBS.some(j => j.state === 'filling')) return;
+  const next = [...JOBS].reverse().find(j => j.state === 'queued');
+  if (next) fill(next, false);
+}
+setInterval(runFillQueue, 5000);
+function pickLabel() {
+  const vids = (MISS.list || []).filter(v => MISS.picked.has(v.id));
+  const g = vids.filter(v => missStatus(v) === 'missing').length, f = vids.filter(v => missStatus(v) === 'needs').length;
+  return [g ? `Get ${g}` : '', f ? `Fill ${f}` : ''].filter(Boolean).join(' + ') + ' selected';
 }
 // Every 4 s while anything is downloading: a new, finished video in the watch folder whose length matches → claim it.
 let watchT = null; const sizes = {};

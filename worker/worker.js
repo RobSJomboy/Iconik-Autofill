@@ -777,18 +777,38 @@ async function uploadCompleteUrl(env, b) {
 }
 // A channel's newest YouTube uploads, each marked with whether Iconik already has it (Episode ID = video id),
 // or a likely untagged match by title.
-async function appMissing(env, channel, ytChannel, limit) {
+async function appMissing(env, channel, ytChannel, limit, source, cid) {
+  cid = assetIdFrom(cid);
   if (!/^UC[\w-]{22}$/.test(ytChannel || '')) throw new Error('YouTube channel id needed');
-  limit = Math.min(Math.max(Number(limit) || 60, 10), 200);
+  limit = Math.min(Math.max(Number(limit) || 60, 10), 300);
   let token = null; try { token = await ytAccess(env, ytChannel); } catch {}
   const auth = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
   const q = token ? '' : '&key=' + env.YT_KEY;
+  // The channel's playlists, for the source picker (Podcast, etc.).
+  let playlists = [];
+  try {
+    const pl = await (await fetch(`https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&maxResults=50&channelId=${ytChannel}${q}`, auth)).json();
+    playlists = (pl.items || []).map((x) => ({ id: x.id, title: x.snippet.title, count: (x.contentDetails || {}).itemCount || 0 }));
+  } catch {}
   const ids = []; let pageToken = '';
-  while (ids.length < limit) {
-    const r = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=UU${ytChannel.slice(2)}${pageToken ? '&pageToken=' + pageToken : ''}${q}`, auth)).json();
-    if (r.error) throw new Error('YouTube: ' + r.error.message);
-    ids.push(...(r.items || []).map((i) => i.contentDetails.videoId));
-    if (!r.nextPageToken) break; pageToken = r.nextPageToken;
+  source = source || 'uploads';
+  if (source === 'live') {
+    // Past livestreams (search, 100 quota units a page).
+    while (ids.length < limit) {
+      const r = await (await fetch(`https://www.googleapis.com/youtube/v3/search?part=id&type=video&eventType=completed&order=date&maxResults=50&channelId=${ytChannel}${pageToken ? '&pageToken=' + pageToken : ''}&key=${env.YT_KEY}`)).json();
+      if (r.error) throw new Error('YouTube: ' + r.error.message);
+      ids.push(...(r.items || []).map((i) => i.id.videoId).filter(Boolean));
+      if (!r.nextPageToken) break; pageToken = r.nextPageToken;
+    }
+  } else {
+    const plId = source === 'uploads' ? 'UU' + ytChannel.slice(2) : source;
+    if (!/^(UU|PL|FL|OL)[\w-]+$/.test(plId)) throw new Error('bad playlist');
+    while (ids.length < limit) {
+      const r = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=${plId}${pageToken ? '&pageToken=' + pageToken : ''}${q}`, auth)).json();
+      if (r.error) throw new Error('YouTube: ' + r.error.message);
+      ids.push(...(r.items || []).map((i) => i.contentDetails.videoId));
+      if (!r.nextPageToken) break; pageToken = r.nextPageToken;
+    }
   }
   const vids = [];
   for (let i = 0; i < Math.min(ids.length, limit); i += 50) {
@@ -799,26 +819,58 @@ async function appMissing(env, channel, ytChannel, limit) {
       thumb: ((x.snippet.thumbnails || {}).medium || {}).url || '' });
   }
   const m = mapFields(await getView(env));
-  const ep = m.episodeId && m.episodeId.name;
+  const ep = m.episodeId && m.episodeId.name, md = m.metaDone && m.metaDone.name;
+  const val = (o, f) => [].concat(((o.metadata || {})[f]) || []).map((x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x)[0];
   const have = new Map();
-  if (ep) for (let i = 0; i < vids.length; i += 100) {
-    const r = await ik(env, '/search/v1/search/?per_page=100&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
-      doc_types: ['assets'], include_fields: ['id', 'title', `metadata.${ep}`],
-      filter: { operator: 'AND', terms: [{ name: `metadata.${ep}`, value_in: vids.slice(i, i + 100).map((v) => v.id) }] } }) });
-    for (const o of r.objects || []) { const vid = [].concat((o.metadata || {})[ep] || []).map((x) => x.value || x)[0]; if (vid) have.set(String(vid), { id: o.id, title: o.title }); }
+  // Clips cut from an episode often carry the episode's video id too, so read every hit and keep, per video,
+  // the asset whose length matches the video (else the longest one).
+  const secsOf = new Map(vids.map((v) => [v.id, v.seconds]));
+  const score = (o, vid) => { const d = Math.abs((o.duration_milliseconds || 0) / 1000 - (secsOf.get(vid) || 0)); return d <= 3 ? 1e9 - d : (o.duration_milliseconds || 0) / 1000; };
+  if (ep) for (let i = 0; i < vids.length; i += 50) {
+    for (let page = 1; page <= 10; page++) {
+      const r = await ik(env, `/search/v1/search/?per_page=100&page=${page}&generate_signed_url=false`, { method: 'POST', body: JSON.stringify({
+        doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', `metadata.${ep}`, ...(md ? [`metadata.${md}`] : [])],
+        filter: { operator: 'AND', terms: [{ name: `metadata.${ep}`, value_in: vids.slice(i, i + 50).map((v) => v.id) }] } }) });
+      for (const o of r.objects || []) {
+        const vid = String(val(o, ep) || ''); if (!vid) continue;
+        const cur = have.get(vid), sc = score(o, vid);
+        if (!cur || sc > cur.sc) have.set(vid, { id: o.id, title: o.title, sc, done: md ? String(val(o, md)) === 'true' : true });
+      }
+      if (!r.pages || page >= r.pages) break;
+    }
   }
-  // Not tagged with the video id: look for an asset with the same title (maybe uploaded but never filled in).
-  const todo = vids.filter((v) => !have.has(v.id) && v.live === 'none').slice(0, 40);
-  const maybe = new Map();
+  // Not tagged with the video id: an asset in the channel's folder with the same length and no Episode ID
+  // (uploaded but never filled in), else one with the same title.
+  const todo = vids.filter((v) => !have.has(v.id) && v.live === 'none').slice(0, 120);
+  const maybe = new Map(), claimed = new Set([...have.values()].map((h) => h.id));
   for (let i = 0; i < todo.length; i += 8) await Promise.all(todo.slice(i, i + 8).map(async (v) => {
-    try { const h = await findAssets(env, { title: v.title }); if (h.length) maybe.set(v.id, { id: h[0].id, title: h[0].title }); } catch {}
+    try {
+      if (cid && v.seconds > 0) {
+        const r = await ik(env, '/search/v1/search/?per_page=15&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
+          doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', 'date_created', 'media_type', ...(ep ? [`metadata.${ep}`] : [])],
+          filter: { operator: 'AND', terms: [{ name: 'ancestor_collections', value_in: [cid] },
+            { name: 'duration_milliseconds', range: { min: String(v.seconds * 1000 - 1500), max: String(v.seconds * 1000 + 1500) } }] } }) });
+        // The finished export lands in Iconik around when the video goes up (raw recordings and old archive copies don't),
+        // and it's video, not a WAV.
+        const pub = Date.parse(v.publishAt || v.published);
+        // Archive copies imported later still count when the filename carries the episode's date ("TB_October 14th…").
+        const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const days = [-1, 0, 1].map((k) => { const d = new Date(pub - 5 * 3600e3 + k * 864e5); return [MON[d.getUTCMonth()], d.getUTCDate(), d.getUTCMonth() + 1]; });
+        const dated = (t) => { t = String(t || '').toLowerCase();
+          return days.some(([m, dd, mm]) => new RegExp(`\\b${m}[a-z]*\\.?[ _-]*0?${dd}(st|nd|rd|th)?\\b`).test(t)); };
+        const hit = (r.objects || []).find((o) => !(ep && val(o, ep)) && !claimed.has(o.id) && o.media_type !== 'audio'
+          && !/\.(wav|mp3|aif+)$/i.test(o.title || '') && (Math.abs(Date.parse(o.date_created) - pub) < 21 * 864e5 || dated(o.title)));
+        if (hit) { claimed.add(hit.id); maybe.set(v.id, { id: hit.id, title: hit.title, why: 'same length' }); return; }
+      }
+      if (v.seconds > 180) { const h = await findAssets(env, { title: v.title }); if (h.length && !claimed.has(h[0].id)) maybe.set(v.id, { id: h[0].id, title: h[0].title, why: 'same title' }); }
+    } catch {}
   }));
   for (const v of vids) {
     const h = have.get(v.id), mb = maybe.get(v.id);
-    v.inIconik = h ? { id: h.id, title: h.title, url: 'https://app.iconik.io/asset/' + h.id } : null;
-    v.maybe = !h && mb ? { id: mb.id, title: mb.title, url: 'https://app.iconik.io/asset/' + mb.id } : null;
+    v.inIconik = h ? { id: h.id, title: h.title, url: 'https://app.iconik.io/asset/' + h.id, metaDone: h.done } : null;
+    v.maybe = !h && mb ? { id: mb.id, title: mb.title, why: mb.why, url: 'https://app.iconik.io/asset/' + mb.id } : null;
   }
-  return { channel, signedIn: !!token, videos: vids, studio: `https://studio.youtube.com/channel/${ytChannel}/videos` };
+  return { channel, source, playlists, signedIn: !!token, videos: vids, studio: `https://studio.youtube.com/channel/${ytChannel}/videos` };
 }
 
 async function appRoute(env, url, request) {
@@ -848,7 +900,7 @@ async function appRoute(env, url, request) {
     }
     return (await env.YT_AUTH.get('app:rules', 'json')) || { rules: [] };
   }
-  if (p === '/app/missing') return await appMissing(env, url.searchParams.get('channel') || '', url.searchParams.get('yt') || '', url.searchParams.get('limit'));
+  if (p === '/app/missing') return await appMissing(env, url.searchParams.get('channel') || '', url.searchParams.get('yt') || '', url.searchParams.get('limit'), url.searchParams.get('source'), url.searchParams.get('cid'));
   if (p === '/app/youtube/recent') return await ytRecent(env, url.searchParams.get('channel'));
   if (p === '/app/upload/parts') return await uploadParts(env, body);
   if (p === '/app/upload/complete-url') return await uploadCompleteUrl(env, body);
