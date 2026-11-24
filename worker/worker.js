@@ -500,13 +500,43 @@ async function ytAccess(env, channelId) {
   tokenCache[channelId] = { token: t.access_token, exp: Date.now() + (t.expires_in || 3000) * 1000 };
   return t.access_token;
 }
+// Private / scheduled videos are invisible to the API key. Try each connected channel's sign-in instead.
+// Returns { item, channelId } or null.
+async function ytOwnedVideo(env, id, parts) {
+  const ks = await env.YT_AUTH.list({ prefix: 'rt:' });
+  for (const k of ks.keys) {
+    const ch = k.name.slice(3);
+    try {
+      const token = await ytAccess(env, ch);
+      if (!token) continue;
+      const d = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=${parts}&id=${id}`, { headers: { Authorization: 'Bearer ' + token } })).json();
+      const it = (d.items || [])[0];
+      if (it) return { item: it, channelId: ch };
+    } catch {}
+  }
+  return null;
+}
+async function viaOwnedChannel(env, id) {
+  const r = await ytOwnedVideo(env, id, 'snippet,contentDetails,liveStreamingDetails,status');
+  if (!r) return null;
+  const it = r.item, sn = it.snippet || {}, th = sn.thumbnails || {}, st = it.status || {};
+  const scheduled = !!st.publishAt && st.privacyStatus !== 'public';
+  return {
+    id, title: sn.title || '', channel: sn.channelTitle || '', publishDate: scheduled ? st.publishAt : (sn.publishedAt || ''),
+    lengthSeconds: isoDur((it.contentDetails || {}).duration), keywords: sn.tags || [], description: sn.description || '',
+    category: '', thumbnail: (th.maxres || th.high || th.default || {}).url || '', via: 'channel-signin',
+    live: !!it.liveStreamingDetails || (sn.liveBroadcastContent && sn.liveBroadcastContent !== 'none'),
+    privacy: st.privacyStatus, scheduled, publishAt: st.publishAt || null,
+  };
+}
 // "00:12:34.560" → seconds
 const vttSec = (s) => s.split(':').reduce((a, x) => a * 60 + parseFloat(x), 0);
 // Every place each search term is said. reads: [{id, terms:[...]}] → {id: [seconds…]}
 async function ytAdTimes(env, videoId, reads) {
   if (!env.YT_KEY) throw new Error('YT_KEY missing');
   const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${env.YT_KEY}`)).json();
-  const sn = ((v.items || [])[0] || {}).snippet;
+  let sn = ((v.items || [])[0] || {}).snippet;
+  if (!sn) { const o = await ytOwnedVideo(env, videoId, 'snippet'); sn = o && o.item.snippet; }     // scheduled / private
   if (!sn) throw new Error('video not found');
   const token = await ytAccess(env, sn.channelId);
   if (!token) return { connected: false, channel: sn.channelTitle, connectUrl: WORKER_URL + '/yt/connect' };
@@ -716,14 +746,19 @@ async function ytRecent(env, channelId) {
   if (!/^UC[\w-]{22}$/.test(channelId || '')) throw new Error('YouTube channel id needed');
   const key = env.YT_KEY;
   const pl = 'UU' + channelId.slice(2);
-  const items = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=30&playlistId=${pl}&key=${key}`)).json();
+  // With the channel's sign-in, the uploads list includes scheduled and private videos (the key only sees public ones).
+  let token = null; try { token = await ytAccess(env, channelId); } catch {}
+  const auth = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
+  const q = token ? '' : '&key=' + key;
+  const items = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=30&playlistId=${pl}${q}`, auth)).json();
   if (items.error) throw new Error('YouTube: ' + items.error.message);
   const ids = (items.items || []).map((i) => i.contentDetails.videoId);
-  if (!ids.length) return { videos: [] };
-  const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,status&id=${ids.join(',')}&key=${key}`)).json();
-  return { videos: (v.items || []).map((x) => ({ id: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.snippet.title,
+  if (!ids.length) return { videos: [], signedIn: !!token };
+  const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,status&id=${ids.join(',')}${q}`, auth)).json();
+  return { signedIn: !!token, videos: (v.items || []).map((x) => ({ id: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.snippet.title,
     published: x.snippet.publishedAt, seconds: isoSec(x.contentDetails.duration), privacy: x.status.privacyStatus,
-    publishAt: x.status.publishAt || null, live: x.snippet.liveBroadcastContent,            // 'none' | 'live' | 'upcoming'
+    publishAt: x.status.publishAt || null, scheduled: !!x.status.publishAt && x.status.privacyStatus !== 'public',
+    live: x.snippet.liveBroadcastContent,            // 'none' | 'live' | 'upcoming'
     wasLive: !!x.liveStreamingDetails, ended: (x.liveStreamingDetails || {}).actualEndTime || null,
     thumb: ((x.snippet.thumbnails || {}).medium || {}).url || '' })) };
 }
@@ -756,6 +791,16 @@ async function appRoute(env, url, request) {
     if (!c) throw new Error('No YouTube channel found for ' + body.youtube);
     await env.YT_AUTH.put('ytmap:' + sq(body.channel), JSON.stringify(c));
     return { channel: c };
+  }
+  if (p === '/app/rules') {                // team filename rules: [{pattern, channel, channelId, series, seriesId}]
+    if (request.method === 'POST') {
+      const rules = (Array.isArray(body.rules) ? body.rules : []).filter((r) => r && r.pattern && r.channelId).slice(0, 200)
+        .map((r) => ({ pattern: String(r.pattern).slice(0, 80), channel: String(r.channel || ''), channelId: String(r.channelId),
+          series: String(r.series || ''), seriesId: String(r.seriesId || ''), by: String(r.by || '').slice(0, 60) }));
+      await env.YT_AUTH.put('app:rules', JSON.stringify({ rules, updated: new Date().toISOString(), by: String(body.by || '').slice(0, 60) }));
+      return { ok: true, count: rules.length };
+    }
+    return (await env.YT_AUTH.get('app:rules', 'json')) || { rules: [] };
   }
   if (p === '/app/youtube/recent') return await ytRecent(env, url.searchParams.get('channel'));
   if (p === '/app/upload/parts') return await uploadParts(env, body);
@@ -835,9 +880,11 @@ export default {
     lastWhy = [];
     let out = null;
     if (env.YT_KEY) { try { out = await viaDataApi(id, env.YT_KEY); } catch { lastWhy.push('data api threw'); } }
+    if (!out) { try { out = await viaOwnedChannel(env, id); } catch (e) { lastWhy.push('channel sign-in: ' + e.message); } }
     if (!out) { try { out = await viaPlayer(id); } catch {} }
     if (!out) { try { out = await viaWatchPage(id); } catch {} }
     if (out) out.short = out.lengthSeconds && out.lengthSeconds <= 180 ? await isShort(id) : false;
+    if (out && out.scheduled) { const r = json(out); r.headers.set('Cache-Control', 'no-store'); return r; }
     return out ? json(out) : json({ error: 'YouTube did not return this video (private, unlisted-and-blocked, or wrong ID)', why: lastWhy }, 404);
   },
 };

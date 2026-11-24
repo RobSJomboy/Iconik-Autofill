@@ -586,7 +586,7 @@ function renderSource(){
   const hits = (state.sponsorHits||[]).filter(Boolean).map(x => esc(x).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
   if (hits.length) d = d.replace(new RegExp('('+hits.join('|')+')','gi'), '<mark>$1</mark>');
   el.innerHTML = `<h3>${esc(v.title)}</h3>
-    <div class="meta"><span>${esc(v.channel)}</span><span>${fmtLength(v.lengthSeconds)}</span><span>${esc(fmtPublished(v.publishDate))} ET</span></div>
+    <div class="meta"><span>${esc(v.channel)}</span><span>${fmtLength(v.lengthSeconds)}</span><span>${v.scheduled ? 'Scheduled for ' : ''}${esc(fmtPublished(v.publishDate))} ET</span></div>
     <div><div class="label" style="margin-bottom:6px">Description</div><div class="desc">${d || '<em>No description</em>'}</div></div>
     ${v.keywords.length ? `<div><div class="label" style="margin-bottom:6px">YouTube tags</div><div class="kw">${v.keywords.map(k=>`<span>${esc(k)}</span>`).join('')}</div></div>` : ''}`;
 }

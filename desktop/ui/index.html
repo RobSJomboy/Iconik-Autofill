@@ -158,6 +158,7 @@ header .who{color:var(--mute);font-size:13px}
     <div class="grow"></div>
     <span id="updSlot"></span>
     <button class="small" id="refresh" title="Look for new exports">Refresh</button>
+    <button class="small" id="openRules">Filename rules</button>
     <button class="small" id="openSetup">Setup</button>
   </header>
   <div id="cols">
@@ -219,8 +220,8 @@ const STEPS = [
   {id: 'welcome', name: 'Welcome'},
   {id: 'key', name: 'Team key'},
   {id: 'you', name: 'About you'},
-  {id: 'shows', name: 'Your shows'},
   {id: 'exports', name: 'Export folder'},
+  {id: 'rules', name: 'Filename rules'},
   {id: 'timecodes', name: 'Timecodes & monday'},
   {id: 'agent', name: 'iconik Agent'},
   {id: 'done', name: 'Ready'},
@@ -229,7 +230,7 @@ let step = 0, draft = null;
 
 function startSetup(at = 0) {
   draft = JSON.parse(JSON.stringify(CFG || {}));
-  draft.shows = draft.shows || [];
+  draft.rules = draft.rules || migrateShows(draft);
   draft.autoPush = draft.autoPush !== false;
   draft.ytMode = draft.ytMode || 'auto';
   step = at;
@@ -243,7 +244,6 @@ function maxReach() { for (let i = 0; i < STEPS.length; i++) if (!stepOk(STEPS[i
 function stepOk(id) {
   if (id === 'key') return BOOT.hasKey;
   if (id === 'you') return !!(draft.name && draft.role);
-  if (id === 'shows') return draft.shows.length > 0;
   if (id === 'exports') return !!draft.exportFolder;
   return true;
 }
@@ -261,11 +261,12 @@ function refreshNav() {
   const id = STEPS[step].id, ok = stepOk(id);
   $('#nextBtn').disabled = !ok;
   $('#navnote').textContent = ok ? '' : ({key: 'Enter the team key to continue.', you: 'Pick your name and role.',
-    shows: 'Pick at least one show.', exports: 'Choose your export folder.'}[id] || '');
+    exports: 'Choose your export folder.'}[id] || '');
 }
 $('#backBtn').onclick = () => go(Math.max(0, step - 1));
 $('#nextBtn').onclick = async () => {
   if (STEPS[step].id === 'done') return finishSetup();
+  if (STEPS[step].id === 'rules') { const b = $('#nextBtn'); b.disabled = true; try { await saveTeamRules(); } catch (e) { toast('Couldn’t save the rules for the team: ' + e.message, true); } b.disabled = false; }
   go(step + 1);
 };
 
@@ -281,7 +282,7 @@ const PAGES = {
         <div><b>4</b><span>monday ad reads get the YouTube link and timecode</span></div>
       </div>
       <div class="card"><h3>Setup takes about 3 minutes</h3>
-        <span class="muted">You'll need the <b>team key</b> (ask Rob Scirocco), the shows you work on, and where your exports go. You only do this once, and you can reopen it any time from <b>Setup</b>.</span></div>
+        <span class="muted">You'll need the <b>team key</b> (ask Rob Scirocco), where your exports go, and how you name them. You only do this once, and you can reopen it any time from <b>Setup</b>.</span></div>
     </div>`;
   },
 
@@ -356,51 +357,48 @@ const PAGES = {
     refreshNav();
   },
 
-  async shows() {
+  async rules() {
     $('#stage').innerHTML = `<div class="page">
-      <h1>Your <em>shows</em></h1>
-      <p class="lede">Pick every show you export for. Each one uploads into its folder under <b>Iconik › Channels</b>. If you work on more than one, give each a filename start (like <code>TB_</code>) so the app knows where each export goes.</p>
-      <div class="card"><div class="row" style="margin-bottom:10px"><input type="text" id="showFilter" class="grow" placeholder="Filter shows…"></div><div class="chips" id="chanChips"><span class="muted"><span class="spinner"></span> Loading the Iconik folders…</span></div></div>
-      <div id="showCards"></div>
+      <h1>Filename <em>rules</em></h1>
+      <p class="lede">Tell the app which Iconik folder each export goes in, based on how the filename starts. <code>TB_</code> matches <code>TB_November 22nd.mp4</code>. Use <code>*</code> for “anything”, like <code>TB_*Short</code>. The longest match wins.</p>
+      <div class="card">
+        <div id="ruleRows"><span class="muted"><span class="spinner"></span> Loading the Iconik folders and the team’s rules…</span></div>
+        <div class="row" style="margin-top:10px"><button class="small" id="ruleAdd">+ Add a rule</button><span class="faint" style="font-size:12px">Rules are shared with everyone on the team, so a new show only needs setting up once.</span></div>
+      </div>
+      <div class="card"><h3>Your newest exports would go to</h3><div id="rulePreview" class="files"></div></div>
     </div>`;
-    try { FOLDERS = FOLDERS || (await api('/app/folders')).channels; } catch (e) { $('#chanChips').innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
-    const paintChips = () => {
-      const q = $('#showFilter').value.toLowerCase();
-      $('#chanChips').innerHTML = FOLDERS.filter(c => !q || c.title.toLowerCase().includes(q)).map(c =>
-        `<button class="chip ${draft.shows.some(s => s.channel === c.title) ? 'on' : ''}" data-c="${esc(c.title)}">${esc(c.title)}</button>`).join('');
-      $$('#chanChips .chip').forEach(b => b.onclick = () => {
-        const c = FOLDERS.find(f => f.title === b.dataset.c);
-        const i = draft.shows.findIndex(s => s.channel === c.title);
-        if (i >= 0) draft.shows.splice(i, 1);
-        else draft.shows.push({channel: c.title, channelId: c.id, seriesId: '', series: '', prefix: ''});
-        paintChips(); paintCards(); refreshNav();
+    try {
+      await loadFolders();
+      const team = await api('/app/rules');
+      draft.seenPatterns = (team.rules || []).map(r => r.pattern.toLowerCase());
+      if (team.rules && team.rules.length) {
+        // Team list first; keep any of mine the team doesn't have yet.
+        const mine = (draft.rules || []).filter(r => !draft.seenPatterns.includes(r.pattern.toLowerCase()));
+        draft.rules = [...team.rules, ...mine];
+      }
+      if (!draft.rules.length) draft.rules = seedRules();
+    } catch (e) { $('#ruleRows').innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
+    const files = draft.exportFolder ? await native('listExports', {folder: draft.exportFolder, limit: 8}) : [];
+    const paintPreview = () => {
+      $('#rulePreview').innerHTML = files.length ? files.map(f => { const r = ruleFor(f.name, draft.rules);
+        return `<div class="f"><span class="nm">${esc(f.name)}</span>${r ? `<span class="pill ok">${esc(folderLabel(r))}</span>` : '<span class="pill warn">no rule: you pick when pushing</span>'}</div>`; }).join('')
+        : '<div class="muted">No exports in your folder yet.</div>';
+    };
+    const paintRows = () => {
+      $('#ruleRows').innerHTML = draft.rules.map((r, i) => `<div class="row rulerow" data-i="${i}" style="margin-bottom:8px;flex-wrap:nowrap">
+          <input type="text" data-k="pattern" value="${esc(r.pattern)}" placeholder="Filename starts with… e.g. TB_" style="width:220px;flex:none">
+          <span class="faint">→</span>
+          <select data-k="folder" class="grow"><option value="">Pick an Iconik folder…</option>${folderOptions(r.seriesId || r.channelId)}</select>
+          <button class="small" data-rm title="Remove this rule">✕</button></div>`).join('') || '<div class="muted">No rules yet. Add one below.</div>';
+      $$('#ruleRows .rulerow').forEach(row => {
+        const r = draft.rules[+row.dataset.i];
+        $('[data-k=pattern]', row).oninput = (e) => { r.pattern = e.target.value.trim(); paintPreview(); };
+        $('[data-k=folder]', row).onchange = (e) => { Object.assign(r, folderById(e.target.value) || {channel: '', channelId: '', series: '', seriesId: ''}); paintPreview(); };
+        $('[data-rm]', row).onclick = () => { draft.rules.splice(+row.dataset.i, 1); paintRows(); paintPreview(); };
       });
     };
-    $('#showFilter').oninput = paintChips;
-    const paintCards = () => {
-      const multi = draft.shows.length > 1;
-      $('#showCards').innerHTML = draft.shows.map((s, i) => {
-        const f = FOLDERS.find(x => x.title === s.channel) || {series: []};
-        return `<div class="card" data-i="${i}">
-          <div class="row"><h3 class="grow">${esc(s.channel)}</h3><button class="link small" data-rm="${i}">Remove</button></div>
-          <div class="show">
-            <label>Iconik folder
-              <select data-k="series"><option value="">${esc(s.channel)} (the channel folder)</option>${f.series.map(x => `<option value="${x.id}" ${x.id === s.seriesId ? 'selected' : ''}>${esc(s.channel)} › ${esc(x.title)}</option>`).join('')}</select></label>
-            <label>Export filenames start with ${multi ? '' : '<span class="faint">(optional)</span>'}
-              <input type="text" data-k="prefix" value="${esc(s.prefix)}" placeholder="e.g. ${esc(initials(s.channel))}"></label>
-          </div>
-          <div class="status" data-st="${i}"><div class="line muted"><span class="ic"><span class="spinner"></span></span>Checking monday and YouTube…</div></div>
-        </div>`;
-      }).join('');
-      $$('#showCards [data-rm]').forEach(b => b.onclick = () => { draft.shows.splice(+b.dataset.rm, 1); paintChips(); paintCards(); refreshNav(); });
-      $$('#showCards .card').forEach(card => {
-        const s = draft.shows[+card.dataset.i];
-        $('[data-k=series]', card).onchange = (e) => { s.seriesId = e.target.value; s.series = e.target.value ? e.target.selectedOptions[0].textContent.split(' › ')[1] : ''; };
-        $('[data-k=prefix]', card).oninput = (e) => { s.prefix = e.target.value.trim(); };
-        paintShowStatus(s, $('[data-st]', card));
-      });
-    };
-    paintChips(); paintCards();
+    $('#ruleAdd').onclick = () => { draft.rules.push({pattern: '', channel: '', channelId: '', series: '', seriesId: ''}); paintRows(); $$('#ruleRows [data-k=pattern]').pop().focus(); };
+    paintRows(); paintPreview();
   },
 
   async exports() {
@@ -415,7 +413,7 @@ const PAGES = {
       <div class="card"><h3>Good to know</h3>
         <ul class="muted" style="margin:6px 0 0;padding-left:18px">
           <li>Push only when the export has finished. If it's still being written, the app waits until the file stops growing.</li>
-          <li>Name exports the way you already do. ${draft.shows.some(s => s.prefix) ? 'Files starting with ' + draft.shows.filter(s => s.prefix).map(s => `<code>${esc(s.prefix)}</code>`).join(', ') + ' go to their show automatically.' : 'If you add a filename start per show in the last step, files go to the right show automatically.'}</li>
+          <li>Name exports the way you already do. In the next step you tell the app which filename starts go to which Iconik folder.</li>
           <li>The Iconik asset is named after the file, so clean names help (for example <code>TB_November 22nd_Skubal Signs with Mets.mp4</code>).</li>
           <li>You can also drop any video onto the app window or its icon.</li>
           <li>If macOS asks to let <b>Push to Iconik</b> access your Desktop or Documents folder, click <b>Allow</b>. That's how it sees your exports.</li>
@@ -427,8 +425,7 @@ const PAGES = {
       if (!draft.exportFolder) return;
       const files = await native('listExports', {folder: draft.exportFolder, limit: 6});
       $('#folderFiles').innerHTML = files.length ? '<div class="faint" style="font-size:12px;margin-top:4px">Newest videos here:</div>' + files.map(f => {
-        const s = showFor(f.name, draft);
-        return `<div class="f"><span class="nm">${esc(f.name)}</span><span class="faint">${ago(f.mtime)}</span>${s ? `<span class="pill ok">${esc(s.channel)}</span>` : draft.shows.length > 1 ? '<span class="pill">pick show when pushing</span>' : ''}</div>`;
+        return `<div class="f"><span class="nm">${esc(f.name)}</span><span class="faint">${ago(f.mtime)}</span></div>`;
       }).join('') : '<div class="muted" style="margin-top:10px">No videos in this folder yet. That’s fine if you haven’t exported anything.</div>';
     };
     $('#pickFolder').onclick = async () => { const p = await native('pickFolder', {start: draft.exportFolder || '~/Desktop'}); if (p) { draft.exportFolder = p; paint(); } };
@@ -450,10 +447,12 @@ const PAGES = {
       <div class="row"><button id="tcRecheck">Check again</button></div>
     </div>`;
     const paint = () => {
-      $('#tcCards').innerHTML = draft.shows.map((s, i) => `<div class="card"><h3>${esc(s.channel)}</h3><div class="status" style="margin-top:4px;border:0;padding:0" data-tc="${i}"><div class="line muted"><span class="ic"><span class="spinner"></span></span>Checking…</div></div></div>`).join('');
-      draft.shows.forEach((s, i) => paintShowStatus(s, $(`[data-tc="${i}"]`), true));
+      const chans = [...new Set(draft.rules.filter(r => r.channel).map(r => r.channel))].map(c => ({channel: c}));
+      if (!chans.length) { $('#tcCards').innerHTML = '<div class="card muted">Add filename rules first, and each show’s status shows up here.</div>'; return; }
+      $('#tcCards').innerHTML = chans.map((s, i) => `<div class="card"><h3>${esc(s.channel)}</h3><div class="status" style="margin-top:4px;border:0;padding:0" data-tc="${i}"><div class="line muted"><span class="ic"><span class="spinner"></span></span>Checking…</div></div></div>`).join('');
+      chans.forEach((s, i) => paintShowStatus(s, $(`[data-tc="${i}"]`), true));
     };
-    $('#tcRecheck').onclick = () => { draft.shows.forEach(s => delete SHOWINFO[s.channel]); paint(); };
+    $('#tcRecheck').onclick = () => { Object.keys(SHOWINFO).forEach(k => delete SHOWINFO[k]); paint(); };
     paint();
   },
 
@@ -511,7 +510,7 @@ const PAGES = {
       </div>
       <div class="card"><h3>Your setup</h3><div class="muted" style="font-size:13px">
         ${esc(draft.name)} · ${esc(draft.role)}<br>
-        ${draft.shows.map(s => `${esc(s.channel)}${s.series ? ' › ' + esc(s.series) : ''}${s.prefix ? ` <code>${esc(s.prefix)}…</code>` : ''}`).join('<br>')}<br>
+        ${draft.rules.filter(r => r.pattern && r.channelId).map(r => `<code>${esc(r.pattern)}</code> → ${esc(folderLabel(r))}`).join('<br>') || 'No filename rules: you pick the folder each time.'}<br>
         Exports: <code>${esc(draft.exportFolder)}</code></div></div>
     </div>`;
     const i = $('#install'); if (i) i.onclick = async () => { await saveDraft(); try { await native('install'); } catch (e) { toast(e.message, true); } };
@@ -555,28 +554,69 @@ async function paintShowStatus(s, el, timecodesView) {
 }
 
 async function saveDraft() { CFG = draft; CFG.setupDone = true; await saveCfg(); }
-async function finishSetup() { await saveDraft(); showMain(true); }
+async function finishSetup() { try { await saveTeamRules(); } catch {} await saveDraft(); showMain(true); }
 
 /* =====================================================================
    MAIN
    ===================================================================== */
-function showFor(name, cfg = CFG) {
-  const shows = (cfg && cfg.shows) || [];
-  const lower = name.toLowerCase();
-  const hit = shows.filter(s => s.prefix && lower.startsWith(s.prefix.toLowerCase())).sort((a, b) => b.prefix.length - a.prefix.length)[0];
-  if (hit) return hit;
-  if (shows.length === 1) return shows[0];
+// ---------- Iconik folders + filename rules ----------
+async function loadFolders() {
+  if (FOLDERS) return FOLDERS;
+  try { FOLDERS = (await api('/app/folders')).channels; if (CFG) { CFG.folders = FOLDERS; saveCfg(); } }
+  catch (e) { if (CFG && CFG.folders) FOLDERS = CFG.folders; else throw e; }
+  return FOLDERS;
+}
+function folderOptions(selected) {
+  return (FOLDERS || []).map(c => `<optgroup label="${esc(c.title)}"><option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.title)}</option>${
+    c.series.map(x => `<option value="${x.id}" ${x.id === selected ? 'selected' : ''}>${esc(c.title)} › ${esc(x.title)}</option>`).join('')}</optgroup>`).join('');
+}
+function folderById(id) {
+  for (const c of FOLDERS || []) {
+    if (c.id === id) return {channel: c.title, channelId: c.id, series: '', seriesId: ''};
+    const x = c.series.find(y => y.id === id);
+    if (x) return {channel: c.title, channelId: c.id, series: x.title, seriesId: x.id};
+  }
   return null;
+}
+const folderLabel = (f) => f ? f.channel + (f.series ? ' › ' + f.series : '') : '';
+const patRe = (p) => new RegExp('^' + p.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*'), 'i');
+const patLen = (p) => p.replace(/\*/g, '').length;
+function ruleFor(name, rules) {
+  rules = rules || (CFG && CFG.rules) || [];
+  return rules.filter(r => r.pattern && r.channelId && patRe(r.pattern).test(name)).sort((a, b) => patLen(b.pattern) - patLen(a.pattern))[0] || null;
+}
+const guessPattern = (name) => (name.match(/^([A-Za-z0-9]{1,12}[_\- ])/) || [])[1] || '';
+function seedRules() {
+  const f = (ch, se) => { const c = (FOLDERS || []).find(x => x.title === ch); if (!c) return null; const x = se && c.series.find(y => y.title === se);
+    return x ? {channel: c.title, channelId: c.id, series: x.title, seriesId: x.id} : se ? null : {channel: c.title, channelId: c.id, series: '', seriesId: ''}; };
+  return [['TB_', "Talkin' Baseball"], ['TYM_', 'Jomboy Media', 'Things You Missed']].map(([p, c, se]) => { const x = f(c, se); return x && {pattern: p, ...x}; }).filter(Boolean);
+}
+// Old setups had one filename start per show; turn those into rules.
+function migrateShows(c) {
+  return (c.shows || []).filter(x => x.prefix).map(x => ({pattern: x.prefix, channel: x.channel, channelId: x.channelId, series: x.series || '', seriesId: x.seriesId || ''}));
+}
+// Saves the team list: mine, plus any rule someone else added since I loaded it.
+async function saveTeamRules() {
+  const mine = (draft || CFG).rules.filter(r => r.pattern && r.channelId);
+  const seen = (draft || CFG).seenPatterns || [];
+  let theirs = [];
+  try { theirs = ((await api('/app/rules')).rules || []).filter(r => !seen.includes(r.pattern.toLowerCase()) && !mine.some(m => m.pattern.toLowerCase() === r.pattern.toLowerCase())); } catch {}
+  const all = [...mine, ...theirs];
+  await api('/app/rules', {body: {rules: all, by: (draft || CFG).name || ''}});
+  (draft || CFG).rules = all; (draft || CFG).seenPatterns = all.map(r => r.pattern.toLowerCase());
+}
+async function ensureShow(channel) {
+  if (!SHOWINFO[channel]) SHOWINFO[channel] = await api('/app/show?channel=' + encodeURIComponent(channel));
+  return SHOWINFO[channel];
 }
 const fileKey = (f) => f.name + '|' + f.size;
 const pushedJob = (f) => JOBS.find(j => j.key === fileKey(f) && j.state !== 'error' && j.state !== 'cancelled');
 
-let pickShow = null, pickSeries = null, ytMode = 'auto';
+let pickFolder = '', ytMode = 'auto';
 function selectFile(f) {
   SEL = f;
-  const s = f && showFor(f.name);
-  pickShow = s ? s.channel : (CFG.lastShow && CFG.shows.some(x => x.channel === CFG.lastShow) ? CFG.lastShow : CFG.shows[0].channel);
-  pickSeries = null;
+  const r = f && ruleFor(f.name);
+  pickFolder = r ? (r.seriesId || r.channelId) : (CFG.lastFolder || '');
   ytMode = CFG.ytMode || 'auto';
   cancelAuto();
   paintMain();
@@ -589,18 +629,16 @@ function paintMain() {
   if (!f) {
     $('#nextCard').innerHTML = `<div id="next"><div class="empty">No videos in <code>${esc(CFG.exportFolder.replace(BOOT.home, '~'))}</code> yet.<br>Export something, or drop a file here.</div></div>`;
   } else {
-    const show = CFG.shows.find(s => s.channel === pickShow) || CFG.shows[0];
-    const folder = (FOLDERS || []).find(x => x.title === show.channel);
-    const seriesId = pickSeries ?? show.seriesId;
-    const series = folder ? folder.series : (show.seriesId ? [{id: show.seriesId, title: show.series}] : []);
+    const rule = ruleFor(f.name), guess = guessPattern(f.name);
     const done = pushedJob(f);
     $('#nextCard').innerHTML = `<div id="next">
       <div class="fname sel">${esc(f.name)}</div>
       <div class="meta">${fmtSize(f.size)}${f.seconds ? ' · ' + fmtDur(f.seconds) : ''} · exported ${ago(f.mtime)}</div>
       <div class="dest">
-        <span class="k">Show</span>
-        <div class="row"><select id="pShow">${CFG.shows.map(s => `<option ${s.channel === show.channel ? 'selected' : ''}>${esc(s.channel)}</option>`).join('')}${(FOLDERS || []).filter(x => !CFG.shows.some(s => s.channel === x.title)).length ? '<option value="__more">Another show…</option>' : ''}</select>
-          <select id="pSeries"><option value="">Channel folder</option>${series.map(x => `<option value="${x.id}" ${x.id === seriesId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
+        <span class="k">Iconik folder</span>
+        <div><select id="pFolder" style="width:100%"><option value="">Pick an Iconik folder…</option>${folderOptions(pickFolder)}</select>
+          <div style="font-size:12px;margin-top:6px" class="faint">${rule ? `Filename rule <code>${esc(rule.pattern)}</code> → ${esc(folderLabel(rule))}` : guess && pickFolder ? `No filename rule matches. <button class="link small" id="saveRule">Always send <code>${esc(guess)}</code> files here</button>` : 'No filename rule matches. Pick the folder, then you can save it as a rule.'}</div></div>
+        
         <span class="k">YouTube</span>
         <div class="ytmode">
           <label><input type="radio" name="ym" value="auto" ${ytMode === 'auto' ? 'checked' : ''}> Find it automatically</label>
@@ -614,20 +652,21 @@ function paintMain() {
       ${done ? `<div class="already warn">Already pushed ${ago(done.created)}. Pushing again makes a second Iconik asset.</div>` : ''}
       <div id="autoSlot"></div>
     </div>`;
-    $('#pShow').onchange = (e) => {
-      if (e.target.value === '__more') { const extra = prompt('Which channel? Type it exactly as it appears in Iconik › Channels:\n\n' + FOLDERS.map(x => x.title).join(', '));
-        const c = extra && FOLDERS.find(x => x.title.toLowerCase() === extra.trim().toLowerCase());
-        if (c) { CFG.shows.push({channel: c.title, channelId: c.id, seriesId: '', series: '', prefix: ''}); saveCfg(); pickShow = c.title; } paintMain(); return; }
-      pickShow = e.target.value; pickSeries = null; paintMain();
+    $('#pFolder').onchange = (e) => { pickFolder = e.target.value; paintMain(); };
+    const sr = $('#saveRule'); if (sr) sr.onclick = async () => {
+      const fo = folderById(pickFolder); if (!fo) return;
+      CFG.rules = (CFG.rules || []).filter(r => r.pattern.toLowerCase() !== guess.toLowerCase());
+      CFG.rules.push({pattern: guess, ...fo}); CFG.seenPatterns = CFG.seenPatterns || [];
+      try { await saveTeamRules(); toast(`Saved for the team: ${guess} → ${folderLabel(fo)}`); } catch (e) { toast(e.message, true); }
+      saveCfg(); paintMain();
     };
-    $('#pSeries').onchange = (e) => { pickSeries = e.target.value; };
     $$('[name=ym]').forEach(r => r.onchange = () => { ytMode = r.value; paintMain(); });
     $('#pushBtn').onclick = () => push();
     if (autoTimer) paintAuto();
   }
   $('#recent').innerHTML = EXPORTS.slice(0, 12).map((x, i) => {
-    const s = showFor(x.name), d = pushedJob(x);
-    return `<div class="r ${SEL && fileKey(SEL) === fileKey(x) ? 'on' : ''}" data-i="${i}"><span class="nm">${esc(x.name)}</span>${d ? '<span class="pill ok">pushed</span>' : s && CFG.shows.length > 1 ? `<span class="pill">${esc(s.channel)}</span>` : ''}<span class="tm">${ago(x.mtime)}</span></div>`;
+    const s = ruleFor(x.name), d = pushedJob(x);
+    return `<div class="r ${SEL && fileKey(SEL) === fileKey(x) ? 'on' : ''}" data-i="${i}"><span class="nm">${esc(x.name)}</span>${d ? '<span class="pill ok">pushed</span>' : s ? `<span class="pill">${esc(folderLabel(s))}</span>` : ''}<span class="tm">${ago(x.mtime)}</span></div>`;
   }).join('') || '<div class="faint">Nothing here yet.</div>';
   $$('#recent .r').forEach(r => r.onclick = () => selectFile(EXPORTS[+r.dataset.i]));
   paintJobs();
@@ -649,7 +688,7 @@ function cancelAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = n
 function maybeAutoPush() {
   if (!CFG.autoPush || !SEL || pushedJob(SEL)) return;
   if (Date.now() - SEL.mtime > 12 * 3600e3) return;             // only fresh exports
-  if (!showFor(SEL.name)) return;                               // ambiguous show: let them pick
+  if (!ruleFor(SEL.name)) return;                               // no rule: let them pick the folder
   autoLeft = 8;
   autoTimer = setInterval(() => { autoLeft--; if (autoLeft <= 0) { cancelAuto(); push(); } else paintAuto(); }, 1000);
   paintAuto();
@@ -657,21 +696,20 @@ function maybeAutoPush() {
 
 /* ---------- jobs ---------- */
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-function push(file = SEL) {
+async function push(file = SEL) {
   if (!file) return;
   cancelAuto();
-  const show = CFG.shows.find(s => s.channel === pickShow) || CFG.shows[0];
-  const seriesId = pickSeries ?? show.seriesId;
-  const collection = seriesId || show.channelId;
-  const seriesName = seriesId ? (((FOLDERS || []).find(x => x.title === show.channel) || {series: []}).series.find(x => x.id === seriesId) || {title: show.series}).title : '';
+  const fo = folderById(pickFolder);
+  if (!fo) return toast('Pick the Iconik folder first.', true);
+  let info = null; try { info = await ensureShow(fo.channel); } catch {}
   const link = ytMode === 'paste' ? ($('#pLink') ? $('#pLink').value.trim() : '') : '';
   const job = {id: newId(), key: fileKey(file), path: file.path, name: file.name, size: file.size, seconds: file.seconds || 0, mtime: file.mtime,
-    channel: show.channel, series: seriesName, collection, youtube: show.youtube || null, ytMode, yt: link || null,
-    state: 'uploading', phase: 'checking', sent: 0, created: Date.now()};
+    channel: fo.channel, series: fo.series, collection: fo.seriesId || fo.channelId, youtube: info && info.youtube ? {id: info.youtube.id, title: info.youtube.title, handle: info.youtube.handle} : null,
+    ytMode, yt: link || null, state: 'uploading', phase: 'checking', sent: 0, created: Date.now()};
   JOBS.unshift(job);
-  CFG.lastShow = show.channel; saveCfg();
+  CFG.lastFolder = pickFolder; saveCfg();
   saveJobs();
-  native('upload', {jobId: job.id, path: job.path, collection});
+  native('upload', {jobId: job.id, path: job.path, collection: job.collection});
   paintMain();
 }
 const job = (id) => JOBS.find(j => j.id === id);
@@ -720,13 +758,15 @@ function scoreVideo(j, v) {
     else if (d <= 20) { s += 35; why.push('about the same length'); }
     else if ((j.seconds <= 180) !== (v.seconds <= 180)) s -= 60;      // Short vs long video
   }
-  const prefix = (CFG.shows.find(x => x.channel === j.channel) || {}).prefix || '';
-  const fw = words(j.name.slice(prefix && j.name.toLowerCase().startsWith(prefix.toLowerCase()) ? prefix.length : 0)), tw = words(v.title);
+  const rule = ruleFor(j.name), lead = rule ? rule.pattern.split('*')[0] : '';
+  const fw = words(lead && j.name.toLowerCase().startsWith(lead.toLowerCase()) ? j.name.slice(lead.length) : j.name), tw = words(v.title);
   const hit = [...fw].filter(w => tw.has(w));
   if (fw.size) { const r = hit.length / Math.min(fw.size, 6); s += Math.round(60 * Math.min(1, r)); if (hit.length) why.push('title shares “' + hit.slice(0, 3).join(' ') + '”'); }
   const ep = j.name.match(/(?:ep(?:isode)?\.?\s*|#|\|\s*)(\d{2,4})\b/i);
   if (ep && new RegExp('[|#]\\s*' + ep[1] + '\\b').test(v.title)) { s += 100; why.push('episode ' + ep[1]); }
   if (older && !why.includes('same length')) return {s: -1};
+  if (v.scheduled) why.push('scheduled');
+  else if (v.privacy === 'private') s -= 50;                            // private with no date: ask rather than guess
   return {s, why};
 }
 const usedVideos = () => new Set(JOBS.filter(j => j.yt).map(j => (j.yt.match(/[\w-]{11}/) || [])[0]));
@@ -770,7 +810,7 @@ async function pollYouTube(now) {
 // Long videos: give YouTube's automatic captions ~30 min after going public, so ad-read timecodes can be found.
 function readyToFill(j, url, v) {
   j.yt = url;
-  if (v) { j.ytTitle = v.title; j.ytPublished = Date.parse(v.published); }
+  if (v) { j.ytTitle = v.title; j.ytPublished = Date.parse(v.published); j.scheduledFor = v.scheduled && v.publishAt ? Date.parse(v.publishAt) : null; }
   const long = (v ? v.seconds : j.seconds) > 180;
   const since = j.ytPublished ? Date.now() - j.ytPublished : Infinity;
   if (long && since < 30 * 60e3 && SHOWINFO_CONNECTED(j.channel)) {
@@ -779,7 +819,7 @@ function readyToFill(j, url, v) {
   } else fill(j);
   saveJobs(); paintJobs();
 }
-const SHOWINFO_CONNECTED = (ch) => { const s = CFG.shows.find(x => x.channel === ch); return !(s && s.captions === false); };
+const SHOWINFO_CONNECTED = (ch) => !SHOWINFO[ch] || !!(SHOWINFO[ch].youtube && SHOWINFO[ch].youtube.connected);
 function checkCaptionWaits() { JOBS.filter(j => j.state === 'captions' && Date.now() >= j.fillAt).forEach(fill); }
 
 function fill(j, front) {
@@ -871,7 +911,7 @@ function paintJobs() {
     if (j.match && j.match.why && j.state !== 'pick') extra += `<div class="faint" style="font-size:11.5px;margin-top:6px">Matched by ${esc(j.match.why)}.</div>`;
     if (['done', 'error', 'cancelled'].includes(j.state)) acts.push(`<button class="small link" data-a="remove" style="margin-left:auto">Remove</button>`);
     return `<div class="job" data-id="${j.id}">
-      <div class="top"><div class="t">${esc(j.name)}<div class="sub">${esc(j.channel)}${j.series ? ' › ' + esc(j.series) : ''} · ${ago(j.created)}</div></div></div>
+      <div class="top"><div class="t">${esc(j.name)}<div class="sub">${esc(j.channel)}${j.series ? ' › ' + esc(j.series) : ''} · ${ago(j.created)}${j.scheduledFor ? ` · <span class="warn">scheduled for ${new Date(j.scheduledFor).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}</span>` : ''}</div></div></div>
       <div class="track">${seg(0)}${seg(1)}${seg(2)}</div>
       <div class="trackl"><span>Upload</span><span>YouTube</span><span>Metadata</span></div>
       <div class="msg">${msg}</div>${extra}
@@ -894,7 +934,7 @@ function paintJobs() {
       if (a === 'fillnow' || a === 'fill') fill(j, true);
       if (a === 'viewfill') native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}).then(() => { j.state = 'error'; j.failedAt = 'fill'; j.error = 'Opened Autofill to review. Press Push to Iconik there, or Fill metadata here.'; paintJobs(); });
       if (a === 'openfill') { j.keepOpen = true; native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}); }
-      if (a === 'retry') { JOBS = JOBS.filter(x => x !== j); const f = {path: j.path, name: j.name, size: j.size, seconds: j.seconds, mtime: j.mtime}; pickShow = j.channel; ytMode = j.ytMode; push(f); }
+      if (a === 'retry') { JOBS = JOBS.filter(x => x !== j); const f = {path: j.path, name: j.name, size: j.size, seconds: j.seconds, mtime: j.mtime}; pickFolder = j.collection; ytMode = j.ytMode; push(f); }
       if (a === 'remove') { JOBS = JOBS.filter(x => x !== j); saveJobs(); paintMain(); updateBadge(); }
     });
   });
@@ -917,21 +957,21 @@ handlers.dropped = (files) => {
 /* ---------- boot ---------- */
 async function showMain(fresh) {
   $('#setup').classList.add('hidden'); $('#main').classList.remove('hidden');
+  if (!CFG.rules) CFG.rules = migrateShows(CFG);
+  try { await loadFolders(); } catch (e) { toast('Couldn’t load the Iconik folders: ' + e.message, true); }
   await loadExports();
   selectFile(EXPORTS[0] || null);
   if (fresh) maybeAutoPush();
   pollYouTube(true);
   updateBadge();
-  if (!FOLDERS) api('/app/folders').then(r => { FOLDERS = r.channels; paintMain(); }).catch(() => {});
   // Captions status per show, so long videos only wait for captions where they'll be used.
-  CFG.shows.forEach(s => api('/app/show?channel=' + encodeURIComponent(s.channel)).then(i => {
-    SHOWINFO[s.channel] = i; s.captions = !!(i.youtube && i.youtube.connected);
-    if (i.youtube) s.youtube = {id: i.youtube.id, title: i.youtube.title, handle: i.youtube.handle};
-    JOBS.filter(j => j.channel === s.channel && !j.youtube && s.youtube).forEach(j => j.youtube = s.youtube);
-    saveCfg();
-  }).catch(() => {}));
+  // Team rules + each show's YouTube/captions status.
+  api('/app/rules').then(t => { if (t.rules && t.rules.length) { const mine = (CFG.rules || []).filter(r => !t.rules.some(x => x.pattern.toLowerCase() === r.pattern.toLowerCase()));
+    CFG.rules = [...t.rules, ...mine]; CFG.seenPatterns = t.rules.map(r => r.pattern.toLowerCase()); saveCfg(); if (SEL && !pushedJob(SEL)) selectFile(SEL); } }).catch(() => {});
+  [...new Set((CFG.rules || []).map(r => r.channel).filter(Boolean))].forEach(ch => ensureShow(ch).catch(() => {}));
 }
 $('#openSetup').onclick = () => startSetup(1);
+$('#openRules').onclick = () => startSetup(STEPS.findIndex(x => x.id === 'rules'));
 $('#refresh').onclick = async () => { await loadExports(); if (!SEL || !EXPORTS.some(x => fileKey(x) === fileKey(SEL))) selectFile(EXPORTS[0] || null); else paintMain(); toast('Exports refreshed.'); };
 $('#chooseFile').onclick = async () => { const f = await native('pickFile', {start: CFG.exportFolder}); if (f) handlers.dropped([f]); };
 // New exports show up when the window comes back to the front.
