@@ -484,15 +484,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 (try? JSONSerialization.jsonObject(with: Data(contentsOf: SUPPORT.appendingPathComponent(f)))) ?? NSNull() }
             let opened = pendingOpen.compactMap { fileInfo(URL(fileURLWithPath: $0)) }
             pendingOpen = []
-            let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
             return ["config": read("config.json"), "jobs": read("jobs.json"), "hasKey": pushKey != nil,
                     "user": NSFullUserName(), "home": NSHomeDirectory(), "opened": opened,
                     "appPath": Bundle.main.bundlePath, "inApplications": Bundle.main.bundlePath.hasPrefix("/Applications/"),
-                    "onDesktop": FileManager.default.fileExists(atPath: desktop.appendingPathComponent("Push to Iconik").path)
-                        || FileManager.default.fileExists(atPath: desktop.appendingPathComponent("Push to Iconik.app").path),
                     "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "dev",
-                    "agent": agentInstalled(), "agentRunning": agentRunning(),
-                    "desktopExports": FileManager.default.fileExists(atPath: desktop.appendingPathComponent("EXPORTS").path)]
+                    "agent": agentInstalled(), "agentRunning": agentRunning()]
+        case "desktopInfo":
+            // Touching ~/Desktop can wait on macOS's folder-access prompt, so never do it during startup.
+            return await Task.detached { () -> [String: Bool] in
+                let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+                let fm = FileManager.default
+                return ["onDesktop": fm.fileExists(atPath: d.appendingPathComponent("Push to Iconik").path) || fm.fileExists(atPath: d.appendingPathComponent("Push to Iconik.app").path),
+                        "desktopExports": fm.fileExists(atPath: d.appendingPathComponent("EXPORTS").path)]
+            }.value
         case "save":
             let name = d["file"] as! String
             guard ["config.json", "jobs.json"].contains(name) else { throw WorkerError(message: "bad file") }

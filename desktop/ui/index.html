@@ -402,6 +402,7 @@ const PAGES = {
   },
 
   async exports() {
+    Object.assign(BOOT, await native('desktopInfo'));
     if (!draft.exportFolder && BOOT.desktopExports) draft.exportFolder = BOOT.home + '/Desktop/EXPORTS';
     $('#stage').innerHTML = `<div class="page">
       <h1>Export <em>folder</em></h1>
@@ -485,8 +486,8 @@ const PAGES = {
     paint();
   },
 
-  done() {
-    const tips = [];
+  async done() {
+    Object.assign(BOOT, await native('desktopInfo'));
     $('#stage').innerHTML = `<div class="page">
       <h1>You’re <em>ready</em></h1>
       <p class="lede">From now on: export, double-click <b>Push to Iconik</b>, and you're done. You can close the window and the app keeps working in your Dock. It sends a notification when the metadata is in.</p>
@@ -958,6 +959,9 @@ handlers.dropped = (files) => {
 async function showMain(fresh) {
   $('#setup').classList.add('hidden'); $('#main').classList.remove('hidden');
   if (!CFG.rules) CFG.rules = migrateShows(CFG);
+  $('#who').textContent = `${CFG.name} · ${CFG.role[0].toUpperCase() + CFG.role.slice(1)}`;
+  $('#nextCard').innerHTML = '<div id="next"><div class="empty"><span class="spinner"></span> Looking in your export folder…<br><span class="faint">If macOS asks to let Push to Iconik see the folder, click Allow.</span></div></div>';
+  paintJobs();
   try { await loadFolders(); } catch (e) { toast('Couldn’t load the Iconik folders: ' + e.message, true); }
   await loadExports();
   selectFile(EXPORTS[0] || null);
