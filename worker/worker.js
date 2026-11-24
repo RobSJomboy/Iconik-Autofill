@@ -775,6 +775,52 @@ async function uploadCompleteUrl(env, b) {
   const q = new URLSearchParams({ upload_id: b.uploadId, type: 'complete_url', max_part_number: String(b.partsNum) });
   return await ik(env, `/files/v1/assets/${a}/files/${f}/multipart_url/?${q}`);
 }
+// A channel's newest YouTube uploads, each marked with whether Iconik already has it (Episode ID = video id),
+// or a likely untagged match by title.
+async function appMissing(env, channel, ytChannel, limit) {
+  if (!/^UC[\w-]{22}$/.test(ytChannel || '')) throw new Error('YouTube channel id needed');
+  limit = Math.min(Math.max(Number(limit) || 60, 10), 200);
+  let token = null; try { token = await ytAccess(env, ytChannel); } catch {}
+  const auth = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
+  const q = token ? '' : '&key=' + env.YT_KEY;
+  const ids = []; let pageToken = '';
+  while (ids.length < limit) {
+    const r = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&playlistId=UU${ytChannel.slice(2)}${pageToken ? '&pageToken=' + pageToken : ''}${q}`, auth)).json();
+    if (r.error) throw new Error('YouTube: ' + r.error.message);
+    ids.push(...(r.items || []).map((i) => i.contentDetails.videoId));
+    if (!r.nextPageToken) break; pageToken = r.nextPageToken;
+  }
+  const vids = [];
+  for (let i = 0; i < Math.min(ids.length, limit); i += 50) {
+    const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,status&id=${ids.slice(i, Math.min(i + 50, limit)).join(',')}${q}`, auth)).json();
+    for (const x of v.items || []) vids.push({ id: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.snippet.title, published: x.snippet.publishedAt,
+      seconds: isoSec(x.contentDetails.duration), privacy: x.status.privacyStatus, publishAt: x.status.publishAt || null,
+      scheduled: !!x.status.publishAt && x.status.privacyStatus !== 'public', live: x.snippet.liveBroadcastContent, wasLive: !!x.liveStreamingDetails,
+      thumb: ((x.snippet.thumbnails || {}).medium || {}).url || '' });
+  }
+  const m = mapFields(await getView(env));
+  const ep = m.episodeId && m.episodeId.name;
+  const have = new Map();
+  if (ep) for (let i = 0; i < vids.length; i += 100) {
+    const r = await ik(env, '/search/v1/search/?per_page=100&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
+      doc_types: ['assets'], include_fields: ['id', 'title', `metadata.${ep}`],
+      filter: { operator: 'AND', terms: [{ name: `metadata.${ep}`, value_in: vids.slice(i, i + 100).map((v) => v.id) }] } }) });
+    for (const o of r.objects || []) { const vid = [].concat((o.metadata || {})[ep] || []).map((x) => x.value || x)[0]; if (vid) have.set(String(vid), { id: o.id, title: o.title }); }
+  }
+  // Not tagged with the video id: look for an asset with the same title (maybe uploaded but never filled in).
+  const todo = vids.filter((v) => !have.has(v.id) && v.live === 'none').slice(0, 40);
+  const maybe = new Map();
+  for (let i = 0; i < todo.length; i += 8) await Promise.all(todo.slice(i, i + 8).map(async (v) => {
+    try { const h = await findAssets(env, { title: v.title }); if (h.length) maybe.set(v.id, { id: h[0].id, title: h[0].title }); } catch {}
+  }));
+  for (const v of vids) {
+    const h = have.get(v.id), mb = maybe.get(v.id);
+    v.inIconik = h ? { id: h.id, title: h.title, url: 'https://app.iconik.io/asset/' + h.id } : null;
+    v.maybe = !h && mb ? { id: mb.id, title: mb.title, url: 'https://app.iconik.io/asset/' + mb.id } : null;
+  }
+  return { channel, signedIn: !!token, videos: vids, studio: `https://studio.youtube.com/channel/${ytChannel}/videos` };
+}
+
 async function appRoute(env, url, request) {
   const p = url.pathname, body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
   if (p === '/app/key') return { ok: true };
@@ -802,6 +848,7 @@ async function appRoute(env, url, request) {
     }
     return (await env.YT_AUTH.get('app:rules', 'json')) || { rules: [] };
   }
+  if (p === '/app/missing') return await appMissing(env, url.searchParams.get('channel') || '', url.searchParams.get('yt') || '', url.searchParams.get('limit'));
   if (p === '/app/youtube/recent') return await ytRecent(env, url.searchParams.get('channel'));
   if (p === '/app/upload/parts') return await uploadParts(env, body);
   if (p === '/app/upload/complete-url') return await uploadCompleteUrl(env, body);

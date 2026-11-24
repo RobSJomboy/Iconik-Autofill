@@ -9,6 +9,7 @@
 import Cocoa
 import WebKit
 import UserNotifications
+import AVFoundation
 
 let WORKER = "https://jomboy-yt.jomboymedia.workers.dev"
 let SITE = "https://robsjomboy.github.io/Iconik-Autofill/"
@@ -80,7 +81,9 @@ func worker(_ method: String, _ path: String, _ body: Any? = nil) async throws -
 func durationOf(_ url: URL) -> Double? {
     if let item = MDItemCreateWithURL(nil, url as CFURL),
        let n = MDItemCopyAttribute(item, kMDItemDurationSeconds) as? NSNumber { return n.doubleValue }
-    return nil
+    // Not in Spotlight yet (fresh downloads, unindexed folders): read it from the file.
+    let d = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+    return d.isFinite && d > 0 ? d : nil
 }
 
 func fileInfo(_ url: URL) -> [String: Any]? {
@@ -528,6 +531,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "listExports":
             let folder = d["folder"] as? String ?? "", limit = d["limit"] as? Int ?? 30
             return await Task.detached { listExports(folder, limit: limit) }.value
+        case "moveFile":
+            // A finished download → the user's "from YouTube" folder (never overwrites: adds " 2", " 3"…).
+            let src = URL(fileURLWithPath: d["path"] as! String)
+            let dir = URL(fileURLWithPath: ((d["dir"] as? String ?? "~/Movies/From YouTube") as NSString).expandingTildeInPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let base = src.deletingPathExtension().lastPathComponent, ext = src.pathExtension
+            var dest = dir.appendingPathComponent(src.lastPathComponent), n = 2
+            while FileManager.default.fileExists(atPath: dest.path) { dest = dir.appendingPathComponent("\(base) \(n).\(ext)"); n += 1 }
+            try FileManager.default.moveItem(at: src, to: dest)
+            return fileInfo(dest)
         case "fileInfo":
             return fileInfo(URL(fileURLWithPath: d["path"] as! String))
         case "folderExists":
