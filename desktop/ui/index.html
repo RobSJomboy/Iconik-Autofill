@@ -910,27 +910,33 @@ function updateBadge() {
 }
 
 /* ---------- job cards ---------- */
-const STEPN = {queued: 2, fetching: 0, claiming: 0, uploaded: 2, uploading: 0, waiting: 1, pick: 1, needlink: 1, captions: 1, filling: 2, done: 3};
+const STEPN = {dlqueued: 0, downloading: 0, queued: 2, fetching: 0, claiming: 0, uploaded: 2, uploading: 0, waiting: 1, pick: 1, needlink: 1, captions: 1, filling: 2, done: 3};
 function paintJobs() {
   const el = $('#jobs'); if (!el) return;
   if (!JOBS.length) { el.innerHTML = '<div class="empty">Nothing pushed yet.<br>Your uploads and their progress show up here.</div>'; return; }
   el.innerHTML = JOBS.slice(0, 25).map(j => {
-    const n = j.state === 'error' ? (j.failedAt === 'fill' ? 2 : j.failedAt === 'upload' ? 0 : 1) : STEPN[j.state] ?? 0;
+    const n = j.state === 'error' ? (j.failedAt === 'fill' ? 2 : j.failedAt === 'upload' || j.failedAt === 'download' ? 0 : 1) : STEPN[j.state] ?? 0;
     const pct = j.size ? Math.min(100, Math.round(100 * (j.sent || 0) / j.size)) : 0;
     const seg = (i) => {
       if (j.state === 'cancelled') return '<div></div>';
       if (j.state === 'done' && i <= (j.ytMode === 'none' && !j.filled ? 0 : 2)) return '<div class="done"></div>';
       if (i < n) return '<div class="done"></div>';
       if (i === n && j.state === 'error') return '<div class="err"></div>';
-      if (i === n && j.state !== 'done') return `<div class="now ${i === 0 && j.phase === 'uploading' ? '' : 'spin'}" style="--p:${pct}%"><i></i></div>`;
+      if (i === n && j.state === 'downloading' && j.dlPhase === 'downloading') return `<div class="now" style="--p:${Math.round((j.pct || 0) / 2)}%"><i></i></div>`;
+      if (i === n && j.state !== 'done') return `<div class="now ${i === 0 && j.phase === 'uploading' ? '' : 'spin'}" style="--p:${j.kind === 'fetch' && i === 0 && j.phase === 'uploading' ? 50 + Math.round(pct / 2) : pct}%"><i></i></div>`;
       return '<div></div>';
     };
     let msg = '', acts = [], extra = '';
     switch (j.state) {
+      case 'dlqueued':
+        msg = '<span class="muted">Waiting its turn to download…</span>'; acts.push(`<button class="small" data-a="cancelfetch">Cancel</button>`); break;
+      case 'downloading':
+        msg = `<span class="spinner"></span> ${{starting: 'Starting the download…', downloading: `Downloading from YouTube · ${Math.round(j.pct || 0)}%`, merging: 'Joining video and audio…', updating: 'Updating the downloader…'}[j.dlPhase] || 'Downloading…'}`;
+        acts.push(`<button class="small" data-a="canceldl">Cancel</button>`, `<button class="small" data-a="studio">Download in Studio instead</button>`); break;
       case 'queued':
         msg = '<span class="muted">Waiting its turn to fill metadata…</span>'; acts.push(`<button class="small" data-a="cancelfetch">Cancel</button>`); break;
       case 'fetching': case 'claiming':
-        msg = `<span class="spinner"></span> Waiting for the download. In YouTube Studio click <b>⋮ → Download</b>. It gets picked up from <code>${esc(CFG.watchFolder || '~/Downloads')}</code>.`;
+        msg = `${j.note ? `<span class="warn">${esc(j.note)}</span><br>` : ''}<span class="spinner"></span> Waiting for the download. In YouTube Studio click <b>⋮ → Download</b>. It gets picked up from <code>${esc(CFG.watchFolder || '~/Downloads')}</code>.`;
         acts.push(`<button class="small" data-a="studio">Open in Studio</button>`, `<button class="small" data-a="havefile">I have the file</button>`, `<button class="small" data-a="cancelfetch">Cancel</button>`); break;
       case 'uploading':
         msg = {checking: 'Checking the export…', writing: 'Export is still being written. Waiting for it to finish…', starting: 'Creating the Iconik asset…',
@@ -986,6 +992,8 @@ function paintJobs() {
       if (a === 'cancel') native('cancelUpload', {jobId: j.id});
       if (a === 'studio') native('open', {url: studioUrl(j.ytVideo.id)});
       if (a === 'cancelfetch') { j.state = 'cancelled'; saveJobs(); paintJobs(); }
+      if (a === 'canceldl') native('cancelYtdl', {jobId: j.id});
+      if (a === 'studio' && j.state === 'downloading') { native('cancelYtdl', {jobId: j.id}); setTimeout(() => { j.state = 'fetching'; j.created = Date.now(); saveJobs(); paintJobs(); watchDownloads(); }, 600); }
       if (a === 'havefile') native('pickFile', {start: CFG.watchFolder || '~/Downloads'}).then(f => { if (!f) return;
         Object.assign(j, {path: f.path, name: f.name, size: f.size, mtime: f.mtime, key: f.name + '|' + f.size, state: 'uploading', phase: 'checking', sent: 0});
         native('upload', {jobId: j.id, path: j.path, collection: j.collection}); saveJobs(); paintJobs(); });
@@ -994,7 +1002,7 @@ function paintJobs() {
       if (a === 'fillnow' || a === 'fill') fill(j, true);
       if (a === 'viewfill') native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}).then(() => { j.state = 'error'; j.failedAt = 'fill'; j.error = 'Opened Autofill to review. Press Push to Iconik there, or Fill metadata here.'; paintJobs(); });
       if (a === 'openfill') { j.keepOpen = true; native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}); }
-      if (a === 'retry' && j.kind === 'fetch' && !j.path) { j.state = 'fetching'; j.created = Date.now(); saveJobs(); paintJobs(); watchDownloads(); native('open', {url: studioUrl(j.ytVideo.id)}); return; }
+      if (a === 'retry' && j.kind === 'fetch' && !j.path) { j.error = null; if (TOOLS && TOOLS.ytdlp) { j.state = 'dlqueued'; runDlQueue(); } else { j.state = 'fetching'; j.created = Date.now(); watchDownloads(); native('open', {url: studioUrl(j.ytVideo.id)}); } saveJobs(); paintJobs(); return; }
       if (a === 'retry') { Object.assign(j, {state: 'uploading', phase: 'checking', sent: 0, error: null, assetUrl: null, created: Date.now()}); native('upload', {jobId: j.id, path: j.path, collection: j.collection}); saveJobs(); paintMain(); }
       if (a === 'remove') { JOBS = JOBS.filter(x => x !== j); saveJobs(); paintMain(); updateBadge(); }
     });
@@ -1073,6 +1081,7 @@ async function checkUpdate() {
 let MISS = {channel: '', folder: '', source: 'uploads', playlists: [], list: null, filter: 'todo', kind: 'all', limit: 60, picked: new Set(), loading: '', err: ''};
 const studioUrl = (id) => `https://studio.youtube.com/video/${id}/edit`;
 function openMissing() {
+  if (!TOOLS) loadTools().then(paintMissing);
   $('#cols').classList.add('hidden'); $('#missingView').classList.remove('hidden');
   if (!MISS.channel) { const f = folderById(CFG.lastFolder || '') || (CFG.rules || [])[0]; MISS.channel = f ? f.channel : ''; MISS.folder = ''; }
   CFG.watchFolder = CFG.watchFolder || '~/Downloads'; CFG.fetchFolder = CFG.fetchFolder || '~/Movies/From YouTube';
@@ -1127,7 +1136,7 @@ function paintMissing() {
   const target = (v) => folderLabel(targetFor(v));
   el.innerHTML = `
     <div class="mbar"><h2 class="bebas" style="font-size:30px">Find missing videos</h2><div class="grow"></div><button class="small" id="mClose">Back to pushes</button></div>
-    <p class="muted" style="margin:0 0 14px;max-width:820px">Pick a show. The app compares its YouTube videos with what's in Iconik. <b>Needs metadata</b> means the file is already in Iconik (usually the final edit) but was never filled in: one click fills it. <b>Not in Iconik</b> opens the video in YouTube Studio so you can click Download. The app then picks up the file, uploads it to the show's Final Edits folder and fills it in.</p>
+    <p class="muted" style="margin:0 0 14px;max-width:820px">Pick a show. The app compares its YouTube videos with what's in Iconik. <b>Needs metadata</b> means the file is already in Iconik (usually the final edit) but was never filled in: one click fills it. <b>Not in Iconik</b> downloads the video with Trimm’s downloader, uploads it to the show’s Final Edits folder and fills it in. Private or scheduled videos fall back to YouTube Studio’s Download.</p>
     <div class="card">
       <div class="dest" style="margin:0;grid-template-columns:150px 1fr">
         <span class="k">Show</span>
@@ -1139,7 +1148,8 @@ function paintMissing() {
         <span class="k">New uploads go to ${ikBadge}</span>
         <div><select id="mFolder"><option value="">Automatic: matching filename rule, else the series’ Final Edits (Shorts → Short › Final Edits)</option>${chan ? folderOptionsFor(chan, MISS.folder) : ''}</select></div>
       </div>
-      <div class="faint" style="font-size:12px;margin-top:10px">Downloads are picked up from <code>${esc(CFG.watchFolder)}</code> <button class="link small" id="mWatch">change</button> and kept in <code>${esc(CFG.fetchFolder)}</code> <button class="link small" id="mFetch">change</button></div>
+      <div class="faint" style="font-size:12px;margin-top:10px">${TOOLS && TOOLS.ytdlp ? `<span class="ok">✓ Downloader:</span> ${esc(TOOLS.from || 'yt-dlp')} (yt-dlp ${esc(TOOLS.version || '')}${TOOLS.ffmpeg ? ' + ffmpeg' : ', no ffmpeg: lower quality'}) · 1080p MP4` : TOOLS ? '<span class="warn">No downloader found.</span> Install <b>Trimm</b> to download straight from YouTube. Until then, videos open in YouTube Studio for its Download button.' : ''}
+        · Saved to <code>${esc(CFG.fetchFolder)}</code> <button class="link small" id="mFetch">change</button>${TOOLS && TOOLS.ytdlp ? '' : ` · Studio downloads picked up from <code>${esc(CFG.watchFolder)}</code> <button class="link small" id="mWatch">change</button>`}</div>
     </div>
     ${MISS.loading ? `<div class="empty"><span class="spinner"></span> ${esc(MISS.loading)}</div>` : ''}
     ${MISS.err ? `<div class="empty bad">${esc(MISS.err)}</div>` : ''}
@@ -1174,7 +1184,7 @@ function paintMissing() {
   $('#mFolder').onchange = (e) => { MISS.folder = e.target.value; paintMissing(); };
   $('#mSource').onchange = (e) => { MISS.source = e.target.value; MISS.limit = 60; loadMissing(); };
   $('#mReload').onclick = loadMissing;
-  $('#mWatch').onclick = async () => { const p = await native('pickFolder', {start: CFG.watchFolder, message: 'Which folder do your browser downloads go to?'}); if (p) { CFG.watchFolder = p.replace(BOOT.home, '~'); saveCfg(); paintMissing(); } };
+  if ($('#mWatch')) $('#mWatch').onclick = async () => { const p = await native('pickFolder', {start: CFG.watchFolder, message: 'Which folder do your browser downloads go to?'}); if (p) { CFG.watchFolder = p.replace(BOOT.home, '~'); saveCfg(); paintMissing(); } };
   $('#mFetch').onclick = async () => { const p = await native('pickFolder', {start: CFG.fetchFolder, message: 'Where should downloaded videos be kept?'}); if (p) { CFG.fetchFolder = p.replace(BOOT.home, '~'); saveCfg(); paintMissing(); } };
   $$('[data-f]', el).forEach(b => b.onclick = () => { MISS.filter = b.dataset.f; paintMissing(); });
   $$('[data-k]', el).forEach(b => b.onclick = () => { MISS.kind = b.dataset.k; paintMissing(); });
@@ -1213,12 +1223,50 @@ function fetchJob(v) {
     channel: fo.channel, series: [fo.series, fo.sub].filter(Boolean).join(' › '), collection: folderId(fo), youtube: MISS.yt ? {id: MISS.yt.id, title: MISS.yt.title} : null,
     ytMode: 'paste', state: 'fetching', created: Date.now(), match: {why: 'picked from the show’s video list'}};
 }
-// Opens each video in YouTube Studio (where the channel's own Download lives) and waits for the file.
-function getVideos(vids) {
-  vids.forEach((v, i) => { const j = fetchJob(v); JOBS.unshift(j); setTimeout(() => native('open', {url: studioUrl(v.id)}), i * 700); });
-  saveJobs(); paintMissing(); watchDownloads();
-  toast(vids.length > 1 ? `Opened ${vids.length} videos in YouTube Studio. On each, click ⋮ → Download.` : 'Opened YouTube Studio. Click ⋮ (top right) → Download.');
+// Downloads with Trimm's yt-dlp + ffmpeg (one at a time). Without Trimm, or for private/scheduled videos,
+// it falls back to YouTube Studio's Download and watches the downloads folder.
+let TOOLS = null;
+async function loadTools() { try { TOOLS = await native('tools'); } catch { TOOLS = {ytdlp: null}; } return TOOLS; }
+async function getVideos(vids) {
+  await (TOOLS ? Promise.resolve() : loadTools());
+  const direct = !!(TOOLS && TOOLS.ytdlp);
+  vids.forEach((v, i) => {
+    const j = fetchJob(v);
+    if (direct && !v.scheduled && v.privacy !== 'private') { j.state = 'dlqueued'; }
+    else setTimeout(() => native('open', {url: studioUrl(v.id)}), i * 700);
+    JOBS.unshift(j);
+  });
+  saveJobs(); paintMissing(); paintJobs(); watchDownloads(); runDlQueue();
+  toast(direct ? (vids.length > 1 ? `Downloading ${vids.length} videos with Trimm’s downloader, one at a time.` : 'Downloading with Trimm’s downloader…')
+    : 'Opened YouTube Studio. Click ⋮ (top right) → Download.');
 }
+function runDlQueue() {
+  if (JOBS.some(j => j.state === 'downloading')) return;
+  const next = [...JOBS].reverse().find(j => j.state === 'dlqueued');
+  if (!next) return;
+  next.state = 'downloading'; next.pct = 0; next.dlPhase = 'starting';
+  native('ytdl', {jobId: next.id, url: next.yt, dir: CFG.fetchFolder || '~/Movies/From YouTube'});
+  saveJobs(); paintJobs();
+}
+handlers.ytdl = (e) => {
+  const j = job(e.jobId); if (!j) return;
+  j.dlPhase = e.phase;
+  if (e.pct != null) j.pct = e.pct;
+  if (e.phase === 'done') {
+    native('fileInfo', {path: e.path}).then(f => {
+      Object.assign(j, {path: f.path, name: f.name, size: f.size, mtime: f.mtime, key: f.name + '|' + f.size, state: 'uploading', phase: 'checking', sent: 0});
+      native('upload', {jobId: j.id, path: j.path, collection: j.collection}); saveJobs(); paintJobs(); paintMissing(); runDlQueue();
+    });
+    return;
+  }
+  if (e.phase === 'error') {
+    if (e.studio) { j.state = 'fetching'; j.created = Date.now(); j.note = e.error; native('open', {url: studioUrl(j.ytVideo.id)}); watchDownloads(); }
+    else { j.state = 'error'; j.failedAt = 'download'; j.error = e.error; }
+    runDlQueue();
+  }
+  if (e.phase === 'cancelled') { j.state = 'cancelled'; runDlQueue(); }
+  saveJobs(); paintJobs(); paintMissing();
+};
 // In Iconik without finished metadata: run Autofill on that asset with this video.
 function fillExisting(v, queued) {
   const asset = v.copies[0] || v.linked;
@@ -1281,6 +1329,7 @@ $('#openMissing').onclick = openMissing;
   if (BOOT.opened && BOOT.opened.length && CFG && CFG.setupDone) handlers.dropped(BOOT.opened);
   checkUpdate(); setInterval(checkUpdate, 6 * 3600e3);
   watchDownloads();
+  JOBS.filter(j => j.state === 'downloading').forEach(j => j.state = 'dlqueued'); runDlQueue();
 })();
 </script>
 </body>

@@ -1,1 +1,1 @@
-{"version": "1.4.0", "notes": "Uploads land in Final Edits, finds unfilled final edits in Iconik, clearer YouTube vs Iconik pickers"}
+{"version": "1.5.0", "notes": "Downloads missing videos with Trimm's downloader (yt-dlp + ffmpeg) instead of YouTube Studio"}

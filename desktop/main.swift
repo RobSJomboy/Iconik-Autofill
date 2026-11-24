@@ -108,6 +108,122 @@ func listExports(_ folder: String, limit: Int) -> [[String: Any]] {
     return files.prefix(limit).compactMap { fileInfo($0.1) }
 }
 
+// MARK: Downloader (Trimm's tools: yt-dlp + ffmpeg)
+// Push to Iconik doesn't ship its own copy. It uses Trimm (the team's clip tool) when it's on the Mac: Trimm keeps a
+// self-updating yt-dlp in ~/Library/Application Support/Trimm, and ffmpeg inside its app bundle. Homebrew copies also work.
+// Like Trimm: H.264 + AAC up to 1080p, merged to MP4.
+// H.264 + AAC, best up to 1080p measured on the short side (so a vertical Short comes down at 1080×1920, not 608×1080).
+let YTDLP_FORMAT = "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc1]+ba/bv*+ba/b"
+
+func trimmApp() -> URL? {
+    let fm = FileManager.default, home = fm.homeDirectoryForCurrentUser
+    if let u = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "Trimm") { return u }
+    for p in ["/Applications/Trimm.app", home.path + "/Applications/Trimm.app", home.path + "/Downloads/Trimm.app", home.path + "/Desktop/Trimm.app"]
+        where fm.fileExists(atPath: p) { return URL(fileURLWithPath: p) }
+    return nil
+}
+struct Tools { var ytdlp: String?; var ffmpeg: String?; var from: String }
+func findTools() -> Tools {
+    let fm = FileManager.default, home = fm.homeDirectoryForCurrentUser.path
+    let exe = { (p: String) in fm.isExecutableFile(atPath: p) }
+    var t = Tools(ytdlp: nil, ffmpeg: nil, from: "")
+    let ours = SUPPORT.appendingPathComponent("bin/yt-dlp").path
+    let trimmCopy = home + "/Library/Application Support/Trimm/yt-dlp"
+    if let app = trimmApp() {
+        let fw = app.appendingPathComponent("Contents/Frameworks").path
+        if exe(fw + "/ffmpeg") { t.ffmpeg = fw + "/ffmpeg" }
+        if exe(trimmCopy) { t.ytdlp = trimmCopy } else if exe(fw + "/yt-dlp") {
+            // Keep a writable copy so it can update itself (`yt-dlp -U`) when YouTube changes something.
+            if !exe(ours) {
+                try? fm.createDirectory(at: SUPPORT.appendingPathComponent("bin"), withIntermediateDirectories: true)
+                try? fm.copyItem(atPath: fw + "/yt-dlp", toPath: ours)
+            }
+            if exe(ours) { t.ytdlp = ours }
+        }
+        t.from = "Trimm"
+    }
+    for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        if t.ytdlp == nil, exe(d + "/yt-dlp") { t.ytdlp = d + "/yt-dlp"; t.from = t.from.isEmpty ? "Homebrew" : t.from }
+        if t.ffmpeg == nil, exe(d + "/ffmpeg") { t.ffmpeg = d + "/ffmpeg" }
+    }
+    if t.ytdlp == nil, exe(ours) { t.ytdlp = ours }
+    return t
+}
+func runCapture(_ path: String, _ args: [String]) -> (Int32, String) {
+    let p = Process(); p.executableURL = URL(fileURLWithPath: path); p.arguments = args
+    let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+    do { try p.run() } catch { return (-1, error.localizedDescription) }
+    let d = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+    return (p.terminationStatus, String(data: d, encoding: .utf8) ?? "")
+}
+
+/// One YouTube download: progress → page, final file path at the end.
+final class Downloader {
+    let jobId: String, url: String, dir: URL, emit: ([String: Any]) -> Void
+    var proc: Process?
+    var cancelled = false
+    init(jobId: String, url: String, dir: URL, emit: @escaping ([String: Any]) -> Void) { self.jobId = jobId; self.url = url; self.dir = dir; self.emit = emit }
+    private func say(_ phase: String, _ extra: [String: Any] = [:]) {
+        var d: [String: Any] = ["jobId": jobId, "phase": phase]; extra.forEach { d[$0] = $1 }
+        DispatchQueue.main.async { self.emit(d) }
+    }
+    func start() { DispatchQueue.global().async { self.run(retry: true) } }
+    func cancel() { cancelled = true; proc?.terminate() }
+    private func run(retry: Bool) {
+        let t = findTools()
+        guard let y = t.ytdlp else { say("error", ["error": "No downloader found. Install Trimm (or yt-dlp) and try again."]); return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // The file name becomes the Iconik asset title, so keep it as the YouTube title.
+        var args = ["--newline", "--progress", "--no-playlist", "--no-part", "-f", YTDLP_FORMAT, "-S", "res:1080",
+                    "--merge-output-format", "mp4", "-o", dir.path + "/%(title).150B.%(ext)s",
+                    "--print", "after_move:PTIFILE:%(filepath)s"]
+        if let f = t.ffmpeg { args += ["--ffmpeg-location", f] }
+        args.append(url)
+        let p = Process(); p.executableURL = URL(fileURLWithPath: y); p.arguments = args
+        let out = Pipe(), err = Pipe(); p.standardOutput = out; p.standardError = err
+        proc = p
+        var finalPath: String?, errText = "", buf = "", lastPct = -1.0
+        out.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }
+            buf += String(data: d, encoding: .utf8) ?? ""
+            while let r = buf.range(of: "\n") {
+                let line = String(buf[..<r.lowerBound]); buf.removeSubrange(..<r.upperBound)
+                if line.hasPrefix("PTIFILE:") { finalPath = String(line.dropFirst(8)) }
+                else if let m = line.range(of: #"(\d+(?:\.\d+)?)%"#, options: .regularExpression), line.contains("[download]") {
+                    let pct = Double(line[m].dropLast()) ?? 0
+                    if abs(pct - lastPct) >= 1 { lastPct = pct; self.say("downloading", ["pct": pct, "line": line.trimmingCharacters(in: .whitespaces)]) }
+                } else if line.contains("[Merger]") || line.contains("[VideoConvertor]") { self.say("merging") }
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { h in errText += String(data: h.availableData, encoding: .utf8) ?? "" }
+        say("starting", ["tool": t.from])
+        log("ytdl start \(url) via \(y)")
+        do { try p.run() } catch { say("error", ["error": "Couldn't start the downloader: \(error.localizedDescription)"]); return }
+        p.waitUntilExit()
+        out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
+        if cancelled { say("cancelled"); return }
+        if p.terminationStatus == 0, let f = finalPath, FileManager.default.fileExists(atPath: f) {
+            log("ytdl done \(f)"); say("done", ["path": f]); return
+        }
+        let lastErr = errText.split(separator: "\n").last(where: { $0.contains("ERROR") }).map(String.init) ?? errText.suffix(300).description
+        log("ytdl error \(lastErr)")
+        // Private/scheduled/members videos and YouTube's bot check need the Studio route; a stale yt-dlp gets one self-update.
+        let lower = errText.lowercased()
+        if lower.contains("private video") || lower.contains("members-only") || lower.contains("premieres in") || lower.contains("live event will begin") || lower.contains("not available") && lower.contains("this video") {
+            say("error", ["error": "YouTube won't hand this one out (private, scheduled or members-only). Use Download in Studio.", "studio": true]); return
+        }
+        if lower.contains("sign in to confirm") {
+            say("error", ["error": "YouTube is asking this Mac to prove it isn't a bot. Use Download in Studio for this one.", "studio": true]); return
+        }
+        if retry, y.hasPrefix(SUPPORT.path) || y.contains("/Application Support/Trimm/") {
+            say("updating")
+            let (rc, o) = runCapture(y, ["-U"]); log("ytdl -U rc=\(rc) \(o.suffix(200))")
+            run(retry: false); return
+        }
+        say("error", ["error": "Download failed: " + lastErr.replacingOccurrences(of: "ERROR: ", with: "")])
+    }
+}
+
 // MARK: Upload (worker makes the Iconik asset + signed URL; the bytes go straight from this Mac to Iconik storage)
 
 final class Uploader: NSObject {
@@ -345,6 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var window: NSWindow!
     var web: DropWebView!
     var uploads: [String: Uploader] = [:]
+    var downloads: [String: Downloader] = [:]
     var autofillWindows: [String: NSWindow] = [:]
     var pendingOpen: [String] = []
     var ready = false
@@ -392,9 +509,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     func applicationShouldHandleReopen(_ s: NSApplication, hasVisibleWindows: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
-        if uploads.isEmpty { return .terminateNow }
+        if uploads.isEmpty && downloads.isEmpty { return .terminateNow }
         let a = NSAlert()
-        a.messageText = "An upload is still running"
+        a.messageText = "An upload or download is still running"
         a.informativeText = "Quitting stops it, and you'll have to push that export again."
         a.addButton(withTitle: "Keep uploading"); a.addButton(withTitle: "Quit anyway")
         return a.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
@@ -555,6 +672,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
             uploads[id] = u; u.start()
             return true
+        case "tools":
+            return await Task.detached { () -> [String: Any] in
+                let t = findTools()
+                var v = ""
+                if let y = t.ytdlp { v = runCapture(y, ["--version"]).1.trimmingCharacters(in: .whitespacesAndNewlines) }
+                return ["ytdlp": t.ytdlp ?? NSNull(), "ffmpeg": t.ffmpeg ?? NSNull(), "from": t.from, "version": v, "trimm": trimmApp()?.path ?? NSNull()]
+            }.value
+        case "ytdl":
+            let id = d["jobId"] as! String
+            if downloads[id] != nil { return false }
+            let dir = URL(fileURLWithPath: ((d["dir"] as? String ?? "~/Movies/From YouTube") as NSString).expandingTildeInPath, isDirectory: true)
+            let dl = Downloader(jobId: id, url: d["url"] as! String, dir: dir) { [weak self] ev in
+                self?.send("ytdl", ev)
+                if let ph = ev["phase"] as? String, ["done", "error", "cancelled"].contains(ph) { self?.downloads[id] = nil }
+            }
+            downloads[id] = dl; dl.start()
+            return true
+        case "cancelYtdl":
+            downloads[d["jobId"] as! String]?.cancel(); return true
         case "cancelUpload":
             uploads[d["jobId"] as! String]?.cancel(); return true
         case "open":
