@@ -1,1 +1,1 @@
-{"version": "1.5.0", "notes": "Downloads missing videos with Trimm's downloader (yt-dlp + ffmpeg) instead of YouTube Studio"}
+{"version": "1.6.0", "notes": "Built-in downloader: works without Trimm (sets up yt-dlp + ffmpeg on first use)"}

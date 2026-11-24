@@ -1136,7 +1136,7 @@ function paintMissing() {
   const target = (v) => folderLabel(targetFor(v));
   el.innerHTML = `
     <div class="mbar"><h2 class="bebas" style="font-size:30px">Find missing videos</h2><div class="grow"></div><button class="small" id="mClose">Back to pushes</button></div>
-    <p class="muted" style="margin:0 0 14px;max-width:820px">Pick a show. The app compares its YouTube videos with what's in Iconik. <b>Needs metadata</b> means the file is already in Iconik (usually the final edit) but was never filled in: one click fills it. <b>Not in Iconik</b> downloads the video with Trimm’s downloader, uploads it to the show’s Final Edits folder and fills it in. Private or scheduled videos fall back to YouTube Studio’s Download.</p>
+    <p class="muted" style="margin:0 0 14px;max-width:820px">Pick a show. The app compares its YouTube videos with what's in Iconik. <b>Needs metadata</b> means the file is already in Iconik (usually the final edit) but was never filled in: one click fills it. <b>Not in Iconik</b> downloads the video (the app has the same downloader as Trimm built in), uploads it to the show’s Final Edits folder and fills it in. Private or scheduled videos fall back to YouTube Studio’s Download.</p>
     <div class="card">
       <div class="dest" style="margin:0;grid-template-columns:150px 1fr">
         <span class="k">Show</span>
@@ -1148,7 +1148,7 @@ function paintMissing() {
         <span class="k">New uploads go to ${ikBadge}</span>
         <div><select id="mFolder"><option value="">Automatic: matching filename rule, else the series’ Final Edits (Shorts → Short › Final Edits)</option>${chan ? folderOptionsFor(chan, MISS.folder) : ''}</select></div>
       </div>
-      <div class="faint" style="font-size:12px;margin-top:10px">${TOOLS && TOOLS.ytdlp ? `<span class="ok">✓ Downloader:</span> ${esc(TOOLS.from || 'yt-dlp')} (yt-dlp ${esc(TOOLS.version || '')}${TOOLS.ffmpeg ? ' + ffmpeg' : ', no ffmpeg: lower quality'}) · 1080p MP4` : TOOLS ? '<span class="warn">No downloader found.</span> Install <b>Trimm</b> to download straight from YouTube. Until then, videos open in YouTube Studio for its Download button.' : ''}
+      <div class="faint" style="font-size:12px;margin-top:10px">${TOOLS_MSG ? `<span class="spinner"></span> ${esc(TOOLS_MSG)}` : TOOLS && TOOLS.ytdlp && TOOLS.ffmpeg ? `<span class="ok">✓ Downloader ready</span> (${TOOLS.from === 'Trimm' ? 'using Trimm’s' : 'built in'}: yt-dlp ${esc(TOOLS.version || '')} + ffmpeg) · 1080p MP4` : TOOLS ? '<span class="warn">Downloader not set up yet.</span> <button class="link small" id="mSetupDl">Set it up now</button> (about 70 MB, one time; it also happens on your first download)' : ''}
         · Saved to <code>${esc(CFG.fetchFolder)}</code> <button class="link small" id="mFetch">change</button>${TOOLS && TOOLS.ytdlp ? '' : ` · Studio downloads picked up from <code>${esc(CFG.watchFolder)}</code> <button class="link small" id="mWatch">change</button>`}</div>
     </div>
     ${MISS.loading ? `<div class="empty"><span class="spinner"></span> ${esc(MISS.loading)}</div>` : ''}
@@ -1184,6 +1184,7 @@ function paintMissing() {
   $('#mFolder').onchange = (e) => { MISS.folder = e.target.value; paintMissing(); };
   $('#mSource').onchange = (e) => { MISS.source = e.target.value; MISS.limit = 60; loadMissing(); };
   $('#mReload').onclick = loadMissing;
+  if ($('#mSetupDl')) $('#mSetupDl').onclick = setupDownloader;
   if ($('#mWatch')) $('#mWatch').onclick = async () => { const p = await native('pickFolder', {start: CFG.watchFolder, message: 'Which folder do your browser downloads go to?'}); if (p) { CFG.watchFolder = p.replace(BOOT.home, '~'); saveCfg(); paintMissing(); } };
   $('#mFetch').onclick = async () => { const p = await native('pickFolder', {start: CFG.fetchFolder, message: 'Where should downloaded videos be kept?'}); if (p) { CFG.fetchFolder = p.replace(BOOT.home, '~'); saveCfg(); paintMissing(); } };
   $$('[data-f]', el).forEach(b => b.onclick = () => { MISS.filter = b.dataset.f; paintMissing(); });
@@ -1227,8 +1228,20 @@ function fetchJob(v) {
 // it falls back to YouTube Studio's Download and watches the downloads folder.
 let TOOLS = null;
 async function loadTools() { try { TOOLS = await native('tools'); } catch { TOOLS = {ytdlp: null}; } return TOOLS; }
+let TOOLS_MSG = '';
+handlers.toolsInstall = (m) => { TOOLS_MSG = m.msg; paintMissing(); };
+// One-time setup of the downloader on Macs without Trimm (yt-dlp + ffmpeg, about 70 MB, checksum-checked).
+async function setupDownloader() {
+  if (setupDownloader.p) return setupDownloader.p;
+  TOOLS_MSG = 'Setting up the downloader…'; paintMissing();
+  setupDownloader.p = native('installTools').then(async () => { TOOLS_MSG = ''; await loadTools(); toast('Downloader is set up.'); })
+    .catch(e => { TOOLS_MSG = ''; toast('Couldn’t set up the downloader: ' + e.message, true); })
+    .finally(() => { setupDownloader.p = null; paintMissing(); });
+  return setupDownloader.p;
+}
 async function getVideos(vids) {
   await (TOOLS ? Promise.resolve() : loadTools());
+  if (!TOOLS.ytdlp || !TOOLS.ffmpeg) await setupDownloader();
   const direct = !!(TOOLS && TOOLS.ytdlp);
   vids.forEach((v, i) => {
     const j = fetchJob(v);
@@ -1237,7 +1250,7 @@ async function getVideos(vids) {
     JOBS.unshift(j);
   });
   saveJobs(); paintMissing(); paintJobs(); watchDownloads(); runDlQueue();
-  toast(direct ? (vids.length > 1 ? `Downloading ${vids.length} videos with Trimm’s downloader, one at a time.` : 'Downloading with Trimm’s downloader…')
+  toast(direct ? (vids.length > 1 ? `Downloading ${vids.length} videos, one at a time.` : 'Downloading…')
     : 'Opened YouTube Studio. Click ⋮ (top right) → Download.');
 }
 function runDlQueue() {

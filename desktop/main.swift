@@ -10,6 +10,7 @@ import Cocoa
 import WebKit
 import UserNotifications
 import AVFoundation
+import CryptoKit
 
 let WORKER = "https://jomboy-yt.jomboymedia.workers.dev"
 let SITE = "https://robsjomboy.github.io/Iconik-Autofill/"
@@ -129,7 +130,8 @@ func findTools() -> Tools {
     var t = Tools(ytdlp: nil, ffmpeg: nil, from: "")
     let ours = SUPPORT.appendingPathComponent("bin/yt-dlp").path
     let trimmCopy = home + "/Library/Application Support/Trimm/yt-dlp"
-    if let app = trimmApp() {
+    let noTrimm = ProcessInfo.processInfo.environment["PTI_NO_TRIMM"] != nil      // testing: act like a Mac without Trimm
+    if !noTrimm, let app = trimmApp() {
         let fw = app.appendingPathComponent("Contents/Frameworks").path
         if exe(fw + "/ffmpeg") { t.ffmpeg = fw + "/ffmpeg" }
         if exe(trimmCopy) { t.ytdlp = trimmCopy } else if exe(fw + "/yt-dlp") {
@@ -142,7 +144,11 @@ func findTools() -> Tools {
         }
         t.from = "Trimm"
     }
-    for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
+    // Push to Iconik's own copies (installed on first use, below), for Macs without Trimm.
+    let ourFF = SUPPORT.appendingPathComponent("bin/ffmpeg").path
+    if t.ytdlp == nil, exe(ours) { t.ytdlp = ours; t.from = "Push to Iconik" }
+    if t.ffmpeg == nil, exe(ourFF) { t.ffmpeg = ourFF }
+    for d in ["/opt/homebrew/bin", "/usr/local/bin"] where !noTrimm {
         if t.ytdlp == nil, exe(d + "/yt-dlp") { t.ytdlp = d + "/yt-dlp"; t.from = t.from.isEmpty ? "Homebrew" : t.from }
         if t.ffmpeg == nil, exe(d + "/ffmpeg") { t.ffmpeg = d + "/ffmpeg" }
     }
@@ -155,6 +161,84 @@ func runCapture(_ path: String, _ args: [String]) -> (Int32, String) {
     do { try p.run() } catch { return (-1, error.localizedDescription) }
     let d = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
     return (p.terminationStatus, String(data: d, encoding: .utf8) ?? "")
+}
+
+// The same tools Trimm ships, fetched from their official sources and checked against the published SHA-256:
+//   yt-dlp: github.com/yt-dlp/yt-dlp releases (yt-dlp_macos, universal)   ffmpeg: ffmpeg.martin-riedl.de static builds (what Trimm uses)
+enum ToolInstaller {
+    static func sha256(_ url: URL) throws -> String {
+        let h = try FileHandle(forReadingFrom: url); defer { try? h.close() }
+        var hasher = SHA256()
+        while let d = try h.read(upToCount: 8 << 20), !d.isEmpty { hasher.update(data: d) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+    static func fetchText(_ u: URL) async throws -> String {
+        var r = URLRequest(url: u); r.setValue(UA, forHTTPHeaderField: "User-Agent")
+        let (d, resp) = try await URLSession.shared.data(for: r)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw WorkerError(message: "Couldn't read \(u.lastPathComponent)") }
+        return String(data: d, encoding: .utf8) ?? ""
+    }
+    static func download(_ u: URL) async throws -> (URL, URL) {
+        var r = URLRequest(url: u); r.setValue(UA, forHTTPHeaderField: "User-Agent"); r.timeoutInterval = 600
+        let (tmp, resp) = try await URLSession.shared.download(for: r)
+        guard let h = resp as? HTTPURLResponse, h.statusCode == 200 else { throw WorkerError(message: "Download of \(u.lastPathComponent) failed") }
+        let keep = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.moveItem(at: tmp, to: keep)
+        return (keep, h.url ?? u)
+    }
+    /// Installs whatever is missing into Support/bin. say(text) reports progress.
+    static func install(say: @escaping (String) -> Void) async throws -> Tools {
+        let fm = FileManager.default, bin = SUPPORT.appendingPathComponent("bin")
+        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+        var t = findTools()
+        if t.ytdlp == nil {
+            say("Downloading yt-dlp (about 37 MB)…")
+            let base = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/"
+            let (file, _) = try await download(URL(string: base + "yt-dlp_macos")!)
+            say("Checking yt-dlp…")
+            let sums = try await fetchText(URL(string: base + "SHA2-256SUMS")!)
+            let want = sums.split(separator: "\n").first { $0.hasSuffix(" yt-dlp_macos") }?.split(separator: " ").first.map(String.init) ?? ""
+            guard !want.isEmpty, try sha256(file) == want else { try? fm.removeItem(at: file); throw WorkerError(message: "yt-dlp didn't match its published checksum, so it wasn't installed.") }
+            let dest = bin.appendingPathComponent("yt-dlp"); try? fm.removeItem(at: dest)
+            try fm.moveItem(at: file, to: dest)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
+        }
+        t = findTools()
+        if t.ffmpeg == nil {
+            #if arch(arm64)
+            let arch = "arm64"
+            #else
+            let arch = "amd64"
+            #endif
+            say("Downloading ffmpeg (about 30 MB)…")
+            let (zip, final) = try await download(URL(string: "https://ffmpeg.martin-riedl.de/redirect/latest/macos/\(arch)/release/ffmpeg.zip")!)
+            say("Checking ffmpeg…")
+            let want = (try await fetchText(URL(string: final.absoluteString + ".sha256")!)).split(separator: " ").first.map(String.init) ?? ""
+            guard !want.isEmpty, try sha256(zip) == want else { try? fm.removeItem(at: zip); throw WorkerError(message: "ffmpeg didn't match its published checksum, so it wasn't installed.") }
+            let out = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let (rc, msg) = runCapture("/usr/bin/ditto", ["-x", "-k", zip.path, out.path])
+            try? fm.removeItem(at: zip)
+            guard rc == 0, let ff = (try? fm.contentsOfDirectory(atPath: out.path))?.first(where: { $0 == "ffmpeg" }) else { throw WorkerError(message: "Couldn't unpack ffmpeg: \(msg.prefix(120))") }
+            let dest = bin.appendingPathComponent("ffmpeg"); try? fm.removeItem(at: dest)
+            try fm.moveItem(at: out.appendingPathComponent(ff), to: dest)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
+            try? fm.removeItem(at: out)
+        }
+        t = findTools()
+        if let y = t.ytdlp, runCapture(y, ["--version"]).0 != 0 { throw WorkerError(message: "yt-dlp was installed but won't run on this Mac.") }
+        return t
+    }
+    /// Our own yt-dlp keeps itself current (YouTube changes often). Weekly, in the background.
+    static func maintain() {
+        let ours = SUPPORT.appendingPathComponent("bin/yt-dlp").path
+        guard FileManager.default.isExecutableFile(atPath: ours) else { return }
+        let stamp = SUPPORT.appendingPathComponent("bin/.updated")
+        if let d = (try? FileManager.default.attributesOfItem(atPath: stamp.path))?[.modificationDate] as? Date, Date().timeIntervalSince(d) < 7 * 86400 { return }
+        DispatchQueue.global(qos: .background).async {
+            let (rc, o) = runCapture(ours, ["-U"]); log("yt-dlp -U rc=\(rc) \(o.suffix(160))")
+            FileManager.default.createFile(atPath: stamp.path, contents: Data())
+        }
+    }
 }
 
 /// One YouTube download: progress → page, final file path at the end.
@@ -171,7 +255,7 @@ final class Downloader {
     func cancel() { cancelled = true; proc?.terminate() }
     private func run(retry: Bool) {
         let t = findTools()
-        guard let y = t.ytdlp else { say("error", ["error": "No downloader found. Install Trimm (or yt-dlp) and try again."]); return }
+        guard let y = t.ytdlp else { say("error", ["error": "The downloader isn't set up yet."]); return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // The file name becomes the Iconik asset title, so keep it as the YouTube title.
         var args = ["--newline", "--progress", "--no-playlist", "--no-part", "-f", YTDLP_FORMAT, "-S", "res:1080",
@@ -496,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         if ProcessInfo.processInfo.environment["PTI_DEV"] != nil { startDevHook() }
+        ToolInstaller.maintain()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -679,6 +764,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 if let y = t.ytdlp { v = runCapture(y, ["--version"]).1.trimmingCharacters(in: .whitespacesAndNewlines) }
                 return ["ytdlp": t.ytdlp ?? NSNull(), "ffmpeg": t.ffmpeg ?? NSNull(), "from": t.from, "version": v, "trimm": trimmApp()?.path ?? NSNull()]
             }.value
+        case "installTools":
+            let t = try await ToolInstaller.install { [weak self] msg in DispatchQueue.main.async { self?.send("toolsInstall", ["msg": msg]) } }
+            log("tools installed ytdlp=\(t.ytdlp ?? "-") ffmpeg=\(t.ffmpeg ?? "-")")
+            return ["ytdlp": (t.ytdlp as Any?) ?? NSNull(), "ffmpeg": (t.ffmpeg as Any?) ?? NSNull(), "from": t.from] as [String: Any]
         case "ytdl":
             let id = d["jobId"] as! String
             if downloads[id] != nil { return false }
