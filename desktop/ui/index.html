@@ -358,6 +358,7 @@ const PAGES = {
     try { PEOPLE = PEOPLE || await api('/app/people'); } catch (e) { toast(e.message, true); PEOPLE = {producers: [], editors: []}; }
     const names = [...new Set([...PEOPLE.producers, ...PEOPLE.editors])].sort();
     const sel = $('#meName');
+    if (!sel) return;                       // moved to another step while the names loaded
     const guess = draft.name || names.find(n => n.toLowerCase() === String(BOOT.user || '').toLowerCase()) || '';
     sel.innerHTML = '<option value="">Pick your name…</option>' + names.map(n => `<option ${n === guess ? 'selected' : ''}>${esc(n)}</option>`).join('') + '<option value="__other">I’m not on this list</option>';
     if (draft.name && !names.includes(draft.name)) { sel.value = '__other'; $('#otherWrap').classList.remove('hidden'); $('#meOther').value = draft.name; }
@@ -388,8 +389,9 @@ const PAGES = {
         draft.rules = [...team.rules, ...mine];
       }
       if (!draft.rules.length) draft.rules = seedRules();
-    } catch (e) { $('#ruleRows').innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
+    } catch (e) { if ($('#ruleRows')) $('#ruleRows').innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
     const files = draft.exportFolder ? await native('listExports', {folder: draft.exportFolder, limit: 8}) : [];
+    if (!$('#ruleRows')) return;
     const paintPreview = () => {
       $('#rulePreview').innerHTML = files.length ? files.map(f => { const r = ruleFor(f.name, draft.rules);
         return `<div class="f"><span class="nm">${esc(f.name)}</span>${r ? `<span class="pill ok">${esc(folderLabel(r))}</span>` : '<span class="pill warn">no rule: you pick when pushing</span>'}</div>`; }).join('')
@@ -436,6 +438,7 @@ const PAGES = {
       refreshNav();
       if (!draft.exportFolder) return;
       const files = await native('listExports', {folder: draft.exportFolder, limit: 6});
+      if (!$('#folderFiles')) return;
       $('#folderFiles').innerHTML = files.length ? '<div class="faint" style="font-size:12px;margin-top:4px">Newest videos here:</div>' + files.map(f => {
         return `<div class="f"><span class="nm">${esc(f.name)}</span><span class="faint">${ago(f.mtime)}</span></div>`;
       }).join('') : '<div class="muted" style="margin-top:10px">No videos in this folder yet. That’s fine if you haven’t exported anything.</div>';
@@ -483,6 +486,7 @@ const PAGES = {
     </div>`;
     const paint = async () => {
       const a = await native('agent');
+      if (!$('#agentCard')) return;
       $('#agentCard').innerHTML = `<div class="row">
         ${a.installed ? `<span class="pill ok">✓ Installed</span> ${a.running ? '<span class="pill ok">✓ Running</span>' : '<span class="pill warn">Not running</span>'}` : '<span class="pill warn">Not installed</span>'}
         <div class="grow"></div>
