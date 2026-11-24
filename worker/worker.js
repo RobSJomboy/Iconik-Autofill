@@ -302,7 +302,8 @@ async function uploadStart(env, b) {
   if (!file.upload_url) throw new Error('Iconik gave no upload URL: ' + JSON.stringify(file).slice(0, 200));
   console.log(JSON.stringify({ upload: 'start', asset: asset.id, file: file.id, method: file.upload_method || storage.method, size }));
   return { assetId: asset.id, fileId: file.id, assetUrl: `https://app.iconik.io/asset/${asset.id}`, mime,
-    upload_url: file.upload_url, upload_method: file.upload_method || storage.method, upload_headers: file.upload_headers || {} };
+    upload_url: file.upload_url, upload_method: file.upload_method || storage.method, upload_headers: file.upload_headers || {},
+    storage_method: storage.method, multipart_upload_url: file.multipart_upload_url || null };
 }
 async function uploadFinish(env, b) {
   const a = assetIdFrom(b.assetId), f = assetIdFrom(b.fileId);
@@ -666,6 +667,103 @@ async function mondayCheck(env, boardId) {
 }
 
 
+// ── Push to Iconik desktop app (/app/*, team push key required) ──
+// The Mac app never holds Iconik, monday or YouTube credentials; it asks the worker for everything below.
+const CHANNELS_FOLDER = '9dde77b6-c4d5-11f0-a7c7-7e333650b221';   // Iconik › Channels
+async function collectionKids(env, id) {
+  const out = [];
+  for (let page = 1; page <= 5; page++) {
+    const r = await ik(env, `/assets/v1/collections/${id}/contents/?object_types=collections&per_page=100&page=${page}`);
+    for (const o of r.objects || []) if (o.object_type === 'collections' || o.type === 'COLLECTION' || o.title) out.push({ id: o.id, title: o.title });
+    if (!r.pages || page >= r.pages) break;
+  }
+  return out.sort((a, b) => String(a.title).localeCompare(String(b.title)));
+}
+// Channel folders with their series folders, cached 1 hour.
+async function appFolders(env, fresh) {
+  const k = 'appfolders';
+  if (!fresh) { const c = await env.YT_AUTH.get(k, 'json'); if (c) return c; }
+  const chans = await collectionKids(env, CHANNELS_FOLDER);
+  const out = await Promise.all(chans.map(async (c) => ({ ...c, series: await collectionKids(env, c.id).catch(() => []) })));
+  await env.YT_AUTH.put(k, JSON.stringify(out), { expirationTtl: 3600 });
+  return out;
+}
+// One Iconik channel's status for the setup screen: monday boards, its YouTube channel, whether captions are connected.
+async function appShow(env, channel) {
+  const boards = showsFor(channel).map((c) => ({ board: c.board, show: c.show || c.group || c.channel, url: `https://jomboymedia.monday.com/boards/${c.board}` }));
+  let yt = await env.YT_AUTH.get('ytmap:' + sq(channel), 'json');
+  if (!yt && env.YT_KEY) yt = await ytFindChannel(env, channel).catch(() => null);
+  if (yt) yt.connected = !!(await env.YT_AUTH.get('rt:' + yt.id));
+  return { channel, boards, youtube: yt, connectUrl: WORKER_URL + '/yt/connect' };
+}
+async function ytFindChannel(env, q) {
+  const key = env.YT_KEY, base = 'https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&key=' + key;
+  const pick = (c, how) => c && { id: c.id, title: c.snippet.title, handle: c.snippet.customUrl || '', thumb: ((c.snippet.thumbnails || {}).default || {}).url || '', how };
+  const h = String(q).trim();
+  if (/^UC[\w-]{22}$/.test(h)) { const r = await (await fetch(base + '&id=' + h)).json(); return pick((r.items || [])[0], 'id'); }
+  const handle = h.startsWith('@') ? h : '@' + h.replace(/[^A-Za-z0-9._-]/g, '');
+  const r1 = await (await fetch(base + '&forHandle=' + encodeURIComponent(handle))).json();
+  if ((r1.items || [])[0]) return pick(r1.items[0], 'handle');
+  const s = await (await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(h)}&key=${key}`)).json();
+  const id = (((s.items || [])[0] || {}).id || {}).channelId;
+  if (!id) return null;
+  const r2 = await (await fetch(base + '&id=' + id)).json();
+  return pick((r2.items || [])[0], 'search');
+}
+const isoSec = (d) => { const m = String(d || '').match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/); return m ? ((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) : 0; };
+// Newest uploads + livestreams on a channel, with length and live state, so the app can match an export to its video.
+async function ytRecent(env, channelId) {
+  if (!/^UC[\w-]{22}$/.test(channelId || '')) throw new Error('YouTube channel id needed');
+  const key = env.YT_KEY;
+  const pl = 'UU' + channelId.slice(2);
+  const items = await (await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=30&playlistId=${pl}&key=${key}`)).json();
+  if (items.error) throw new Error('YouTube: ' + items.error.message);
+  const ids = (items.items || []).map((i) => i.contentDetails.videoId);
+  if (!ids.length) return { videos: [] };
+  const v = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,status&id=${ids.join(',')}&key=${key}`)).json();
+  return { videos: (v.items || []).map((x) => ({ id: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.snippet.title,
+    published: x.snippet.publishedAt, seconds: isoSec(x.contentDetails.duration), privacy: x.status.privacyStatus,
+    publishAt: x.status.publishAt || null, live: x.snippet.liveBroadcastContent,            // 'none' | 'live' | 'upcoming'
+    wasLive: !!x.liveStreamingDetails, ended: (x.liveStreamingDetails || {}).actualEndTime || null,
+    thumb: ((x.snippet.thumbnails || {}).medium || {}).url || '' })) };
+}
+// S3 multipart pieces for exports over 5 GB.
+async function uploadParts(env, b) {
+  const a = assetIdFrom(b.assetId), f = assetIdFrom(b.fileId);
+  if (!a || !f || !b.uploadId) throw new Error('assetId, fileId and uploadId are required');
+  const q = new URLSearchParams({ upload_id: b.uploadId, parts_num: String(b.partsNum), per_page: String(b.perPage || 100), page: String(b.page || 1) });
+  return await ik(env, `/files/v1/assets/${a}/files/${f}/multipart_url/part/?${q}`);
+}
+async function uploadCompleteUrl(env, b) {
+  const a = assetIdFrom(b.assetId), f = assetIdFrom(b.fileId);
+  if (!a || !f || !b.uploadId) throw new Error('assetId, fileId and uploadId are required');
+  const q = new URLSearchParams({ upload_id: b.uploadId, type: 'complete_url', max_part_number: String(b.partsNum) });
+  return await ik(env, `/files/v1/assets/${a}/files/${f}/multipart_url/?${q}`);
+}
+async function appRoute(env, url, request) {
+  const p = url.pathname, body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+  if (p === '/app/key') return { ok: true };
+  if (p === '/app/folders') return { channelsFolder: CHANNELS_FOLDER, channels: await appFolders(env, url.searchParams.get('fresh') === '1') };
+  if (p === '/app/people') {
+    const c = await iconikCheck(env);
+    const opts = (label) => ((c.allFields || []).find((f) => sq(f.label) === sq(label)) || {}).options || [];
+    return { producers: opts('Producer').map((o) => o.label || o.value), editors: opts('Editor').map((o) => o.label || o.value) };
+  }
+  if (p === '/app/show') return await appShow(env, url.searchParams.get('channel') || '');
+  if (p === '/app/youtube/find') return { channel: await ytFindChannel(env, url.searchParams.get('q') || '') };
+  if (p === '/app/youtube/save') {          // the first person to confirm a show's YouTube channel saves it for everyone
+    const c = await ytFindChannel(env, body.youtube || '');
+    if (!c) throw new Error('No YouTube channel found for ' + body.youtube);
+    await env.YT_AUTH.put('ytmap:' + sq(body.channel), JSON.stringify(c));
+    return { channel: c };
+  }
+  if (p === '/app/youtube/recent') return await ytRecent(env, url.searchParams.get('channel'));
+  if (p === '/app/upload/parts') return await uploadParts(env, body);
+  if (p === '/app/upload/complete-url') return await uploadCompleteUrl(env, body);
+  return null;
+}
+
+
 const INFO_PAGE = (title, body) => new Response(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px;color:#1a1a1a}h1{font-size:26px}</style><h1>${title}</h1>${body}`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 const HOME_HTML = `<p>Iconik Autofill is an internal Jomboy Media production tool. Producers paste a YouTube link from one of our own channels and it fills in the asset's Iconik metadata, and checks off sponsored ad reads on our monday.com boards.</p><p>The tool lives at <a href="https://robsjomboy.github.io/Iconik-Autofill/">robsjomboy.github.io/Iconik-Autofill</a>. See the <a href="/privacy">privacy policy</a>.</p>`;
 const PRIVACY_HTML = `<p>Iconik Autofill is an internal tool used by Jomboy Media staff.</p><p><b>What it accesses.</b> When a Jomboy Media channel manager connects a YouTube channel, the tool reads that channel's video caption tracks (YouTube scope youtube.force-ssl) so it can find where sponsor names are mentioned in our own videos. It does not upload, edit or delete anything on YouTube.</p><p><b>What it stores.</b> Only the channel's ID, name and a refresh token, kept in encrypted Cloudflare storage so the connection keeps working. Caption text is processed on the fly and not stored.</p><p><b>Sharing.</b> Nothing is sold or shared with third parties. Results are written only to Jomboy Media's own Iconik and monday.com workspaces.</p><p><b>Removing access.</b> Revoke it anytime at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, and the stored token stops working.</p><p>Questions: contact Jomboy Media.</p>`;
@@ -699,6 +797,12 @@ export default {
       const origin = request.headers.get('Origin');
       if (origin && !PAGE_ORIGINS.includes(origin) && !/^http:\/\/localhost(:\d+)?$/.test(origin)) return json({ error: 'Not allowed from ' + origin }, 403);
       try { const r = json(await mondayCheck(env, url.searchParams.get('board'))); r.headers.set('Cache-Control', 'no-store'); return r; }
+      catch (e) { return json({ error: String(e && e.message || e) }, 502); }
+    }
+    if (url.pathname.startsWith('/app/')) {
+      if (env.PUSH_KEY && request.headers.get('X-Push-Key') !== env.PUSH_KEY) return json({ error: 'Team push key missing or wrong.', needsKey: true }, 401);
+      try { const r = await appRoute(env, url, request); if (!r) return json({ error: 'Unknown app route' }, 404);
+        const res = json(r); res.headers.set('Cache-Control', 'no-store'); return res; }
       catch (e) { return json({ error: String(e && e.message || e) }, 502); }
     }
     if (url.pathname.startsWith('/iconik/')) {

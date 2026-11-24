@@ -891,6 +891,7 @@ const listsLoaded = loadLists();
 
 // Deep link (used by the Stream Deck "PUSH TO ICONIK" button):
 //   ?yt=<YouTube link>&asset=<Iconik asset link>&auto=1  → fills the link, runs Generate, then Push to Iconik.
+//   &me=<name>&role=editor|producer (Push to Iconik Mac app) → sets that field to the person who pushed.
 // Without auto=1 it stops after Generate so you can check the picks. The params are cleared so a reload won't push twice.
 (async function deepLink(){
   const q = new URLSearchParams(location.search), yt = q.get('yt');
@@ -901,6 +902,14 @@ const listsLoaded = loadLists();
   await generate();
   const asset = q.get('asset') || '';
   if (asset) $('#asset').value = asset;
+  // From the Push to Iconik Mac app: whoever pushed is the editor or producer on it.
+  const me = q.get('me'), role = q.get('role');
+  if (me && (role === 'editor' || role === 'producer') && state.video){
+    const cur = (state.values[role] || []).filter(n => n !== me);
+    state.values[role] = [me, ...(state.src[role] === 'learn' ? cur : [])];
+    state.src[role] = 'you';
+    renderFields();
+  }
   if (q.get('auto') !== '1' || !state.video) return;
   await new Promise(r => setTimeout(r, 4000));   // let the channel-owner and monday lookups land first
   await pushToIconik(asset || undefined);

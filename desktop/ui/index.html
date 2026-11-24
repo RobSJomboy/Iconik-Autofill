@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Push to Iconik</title>
+<style>
+@font-face{font-family:Bebas;src:url(BebasNeue-Regular.ttf)}
+:root{
+  --bg:#0a1427;--panel:#111f3a;--panel2:#16284a;--rule:#22375e;--ink:#eef2fa;--mute:#93a3c2;--faint:#5f7196;
+  --gold:#d6b24c;--gold2:#f0cf6a;--ok:#3ccf8e;--warn:#f2b441;--bad:#ff6b6b;--blue:#5aa9ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none}
+input,select,textarea,.sel{user-select:text;-webkit-user-select:text}
+a{color:var(--gold2)}
+h1,h2,h3,.bebas{font-family:Bebas,Impact,sans-serif;font-weight:400;letter-spacing:.04em;margin:0}
+.drag{-webkit-app-region:drag;height:38px;position:fixed;top:0;left:0;right:0;z-index:5}
+button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:8px 14px;background:var(--panel2);color:var(--ink);border:1px solid var(--rule)}
+button:hover{border-color:var(--gold)}
+button:disabled{opacity:.45;cursor:default}
+button.gold{background:var(--gold);color:#111;border-color:var(--gold);font-weight:600}
+button.gold:hover{background:var(--gold2)}
+button.link{background:none;border:0;color:var(--gold2);padding:0;text-decoration:underline}
+button.small{padding:5px 10px;font-size:12.5px}
+input[type=text],input[type=password],select{font:inherit;background:#0c1830;color:var(--ink);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;outline:none;min-width:0}
+input:focus,select:focus{border-color:var(--gold)}
+select{-webkit-appearance:none;appearance:none;padding-right:30px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2393a3c2' stroke-width='1.6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center}
+.muted{color:var(--mute)}.faint{color:var(--faint)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:3px 10px;font-size:12px;background:var(--panel2);border:1px solid var(--rule);white-space:nowrap}
+.pill.ok{border-color:#1f6d4c;background:#0f2d24}.pill.warn{border-color:#6e5418;background:#2d240e}.pill.bad{border-color:#7a2a2a;background:#2e1414}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+.hidden{display:none!important}
+
+/* ---------- setup ---------- */
+#setup{display:flex;height:100%}
+#steps{width:230px;flex:none;background:#081022;border-right:1px solid var(--rule);padding:58px 18px 18px;display:flex;flex-direction:column;gap:4px}
+#steps .brand{font-family:Bebas;font-size:30px;line-height:1;color:var(--gold);margin-bottom:18px}
+#steps .brand small{display:block;font-family:-apple-system,system-ui;font-size:11.5px;letter-spacing:0;color:var(--mute);margin-top:6px}
+.stepbtn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--mute);border:0;background:none;text-align:left;width:100%}
+.stepbtn .n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;border:1px solid var(--rule);flex:none}
+.stepbtn.on{background:var(--panel);color:var(--ink)}.stepbtn.on .n{background:var(--gold);color:#111;border-color:var(--gold)}
+.stepbtn.done .n{background:#0f2d24;border-color:#1f6d4c;color:var(--ok)}
+#stage{flex:1;overflow:auto;padding:58px 44px 120px}
+.page{max-width:760px}
+.page h1{font-size:44px;line-height:1;margin-bottom:8px}
+.page h1 em{color:var(--gold);font-style:normal}
+.page .lede{color:var(--mute);font-size:15px;margin:0 0 24px;max-width:620px}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:22px;margin-bottom:6px}
+.how{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}
+.how div{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:14px}
+.how b{font-family:Bebas;font-size:30px;color:var(--gold);display:block;line-height:1}
+.how span{color:var(--mute);font-size:13px}
+#nav{position:fixed;left:230px;right:0;bottom:0;padding:14px 44px;background:linear-gradient(transparent,var(--bg) 30%);display:flex;gap:10px;align-items:center}
+#nav .note{color:var(--mute);font-size:12.5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--rule);color:var(--ink);font-size:13px}
+.chip.on{background:var(--gold);border-color:var(--gold);color:#111;font-weight:600}
+.show{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.show label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mute)}
+.status{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--rule)}
+.status .line{display:flex;gap:10px;align-items:flex-start;font-size:13px}
+.status .line .ic{width:18px;flex:none;text-align:center}
+.files{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.files .f{display:flex;gap:10px;align-items:center;background:#0c1830;border:1px solid var(--rule);border-radius:8px;padding:8px 10px;font-size:13px}
+.files .f .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.yt{display:flex;gap:10px;align-items:center}
+.yt img{width:28px;height:28px;border-radius:50%}
+code{background:#0c1830;border:1px solid var(--rule);border-radius:5px;padding:1px 6px;font-size:12.5px}
+.toggle{display:flex;gap:10px;align-items:center;cursor:pointer}
+.toggle input{width:18px;height:18px;accent-color:var(--gold)}
+
+/* ---------- main ---------- */
+#main{display:flex;flex-direction:column;height:100%}
+header{display:flex;align-items:center;gap:14px;padding:44px 24px 14px;border-bottom:1px solid var(--rule)}
+header .logo{font-family:Bebas;font-size:34px;line-height:1;color:var(--gold)}
+header .who{color:var(--mute);font-size:13px}
+#cols{flex:1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);min-height:0}
+#left{padding:20px 24px;overflow:auto;border-right:1px solid var(--rule)}
+#right{padding:20px 24px;overflow:auto}
+.label{font-family:Bebas;font-size:18px;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+#next{background:linear-gradient(160deg,#16284a,#0f1d38);border:1px solid var(--rule);border-radius:14px;padding:18px 20px;position:relative}
+#next.dragging{border-color:var(--gold);box-shadow:0 0 0 3px #d6b24c33}
+#next .fname{font-size:20px;font-weight:650;line-height:1.25;word-break:break-word}
+#next .meta{color:var(--mute);font-size:13px;margin-top:4px}
+.dest{display:grid;grid-template-columns:90px 1fr;gap:10px 12px;align-items:center;margin:16px 0}
+.dest .k{color:var(--mute);font-size:12.5px}
+.ytmode{display:flex;gap:6px;flex-wrap:wrap}
+.ytmode label{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;border:1px solid var(--rule);background:#0c1830;font-size:12.5px;cursor:pointer}
+.ytmode label:has(input:checked){border-color:var(--gold);background:#2a2410}
+.ytmode input{accent-color:var(--gold);margin:0}
+#pushBtn{width:100%;font-family:Bebas;font-size:34px;letter-spacing:.06em;padding:12px;border-radius:12px;margin-top:6px}
+#auto{margin-top:10px;background:#2a2410;border:1px solid #6e5418;border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px}
+#auto b{font-family:Bebas;font-size:24px;color:var(--gold2);width:24px;text-align:center}
+.already{margin-top:10px;font-size:12.5px}
+.recent{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.recent .r{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;border:1px solid transparent;cursor:pointer;font-size:13px}
+.recent .r:hover{background:var(--panel)}
+.recent .r.on{border-color:var(--gold);background:var(--panel)}
+.recent .r .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent .r .tm{color:var(--faint);font-size:12px;white-space:nowrap}
+.empty{color:var(--mute);border:1px dashed var(--rule);border-radius:12px;padding:26px;text-align:center}
+.job{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.job .top{display:flex;gap:10px;align-items:flex-start}
+.job .t{font-weight:600;word-break:break-word;flex:1}
+.job .sub{color:var(--mute);font-size:12.5px;margin-top:2px}
+.track{display:flex;gap:6px;margin:12px 0 8px}
+.track div{flex:1;height:5px;border-radius:3px;background:#22375e;position:relative;overflow:hidden}
+.track div.done{background:var(--ok)}
+.track div.now{background:#22375e}
+.track div.now i{position:absolute;inset:0;width:var(--p,0%);background:var(--gold)}
+.track div.now.spin i{width:35%;animation:slide 1.4s ease-in-out infinite}
+.track div.err{background:var(--bad)}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+.trackl{display:flex;gap:6px;font-size:11px;color:var(--faint)}
+.trackl span{flex:1}
+.job .msg{font-size:13px;margin-top:6px}
+.job .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.cands{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.cand{display:flex;gap:10px;align-items:center;background:#0c1830;border:1px solid var(--rule);border-radius:8px;padding:6px;cursor:pointer}
+.cand:hover{border-color:var(--gold)}
+.cand img{width:96px;height:54px;object-fit:cover;border-radius:5px;flex:none;background:#000}
+.cand .ct{font-size:12.5px;line-height:1.3}
+.cand .cm{font-size:11.5px;color:var(--mute)}
+.paste{display:flex;gap:6px;margin-top:8px}
+.paste input{flex:1}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#0f2d24;border:1px solid #1f6d4c;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:20}
+#toast.on{opacity:1}
+#toast.bad{background:#2e1414;border-color:#7a2a2a}
+.spinner{width:14px;height:14px;border:2px solid var(--rule);border-top-color:var(--gold);border-radius:50%;animation:rot .8s linear infinite;display:inline-block;vertical-align:-2px}
+@keyframes rot{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="drag"></div>
+
+<!-- ================= SETUP ================= -->
+<div id="setup" class="hidden">
+  <nav id="steps">
+    <div class="brand">Push to Iconik<small>Jomboy Media · one-time setup</small></div>
+  </nav>
+  <main id="stage"></main>
+  <div id="nav">
+    <button id="backBtn">Back</button>
+    <button id="nextBtn" class="gold">Continue</button>
+    <span class="note" id="navnote"></span>
+  </div>
+</div>
+
+<!-- ================= MAIN ================= -->
+<div id="main" class="hidden">
+  <header>
+    <div class="logo">Push to Iconik</div>
+    <div class="who" id="who"></div>
+    <div class="grow"></div>
+    <span id="updSlot"></span>
+    <button class="small" id="refresh" title="Look for new exports">Refresh</button>
+    <button class="small" id="openSetup">Setup</button>
+  </header>
+  <div id="cols">
+    <section id="left">
+      <p class="label">Next up</p>
+      <div id="nextCard"></div>
+      <p class="label" style="margin-top:22px">Recent exports <span class="faint" id="folderName" style="font-family:-apple-system,system-ui;font-size:12px;letter-spacing:0"></span></p>
+      <div id="recent" class="recent"></div>
+      <div class="row" style="margin-top:10px"><button class="small" id="chooseFile">Choose a different file…</button><span class="faint" style="font-size:12px">or drop a video anywhere on this window</span></div>
+    </section>
+    <section id="right">
+      <p class="label">Pushes</p>
+      <div id="jobs"></div>
+    </section>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+window.addEventListener('error', e => { try { window.webkit.messageHandlers.native.postMessage({cmd: 'log', text: 'JS error: ' + e.message + ' @' + e.lineno}); } catch (x) {} });
+window.addEventListener('unhandledrejection', e => { try { window.webkit.messageHandlers.native.postMessage({cmd: 'log', text: 'JS rejection: ' + (e.reason && (e.reason.message || e.reason))}); } catch (x) {} });
+const AUTOFILL = 'https://robsjomboy.github.io/Iconik-Autofill/';
+const AGENT_HELP = 'https://help.iconik.backlight.co/hc/en-us/articles/25303148301719-Installing-Iconik-Agent-on-macOS';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const native = (cmd, args = {}) => window.webkit.messageHandlers.native.postMessage({cmd, ...args});
+const handlers = {};
+window.onNativeRaw = (m) => { try { handlers[m.e] && handlers[m.e](m.d); } catch (e) { console.error(e); } };
+window.onNative = (e, d) => window.onNativeRaw({e, d});
+
+let BOOT = {}, CFG = null, JOBS = [], EXPORTS = [], SEL = null, PEOPLE = null, FOLDERS = null;
+const SHOWINFO = {};          // channel → /app/show answer
+
+function toast(msg, bad) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'on' + (bad ? ' bad' : '');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', 3200);
+}
+async function api(path, opts = {}) {
+  const r = await native('api', {path, method: opts.method || (opts.body ? 'POST' : 'GET'), body: opts.body});
+  if (r.status === 401 && r.json && r.json.needsKey) throw new Error('The team key stopped working. Open Setup and enter it again.');
+  if (r.status < 200 || r.status >= 300) throw new Error((r.json && r.json.error) || ('HTTP ' + r.status));
+  return r.json;
+}
+const fmtSize = (b) => b > 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+const fmtDur = (s) => { if (!s) return ''; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}` : `${m}:${String(x).padStart(2,'0')}`; };
+const ago = (ms) => { const s = (Date.now() - ms) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' hr ago'; const d = Math.round(s / 86400); return d === 1 ? 'yesterday' : d + ' days ago'; };
+const initials = (ch) => ch.replace(/[’']/g, '').split(/[\s&]+/).filter(Boolean).map(w => w[0].toUpperCase()).join('') + '_';
+const saveCfg = () => native('save', {file: 'config.json', data: CFG});
+let saveT; const saveJobs = () => { clearTimeout(saveT); saveT = setTimeout(() => native('save', {file: 'jobs.json', data: JOBS.slice(0, 60)}), 300); };
+
+/* =====================================================================
+   SETUP WIZARD
+   ===================================================================== */
+const STEPS = [
+  {id: 'welcome', name: 'Welcome'},
+  {id: 'key', name: 'Team key'},
+  {id: 'you', name: 'About you'},
+  {id: 'shows', name: 'Your shows'},
+  {id: 'exports', name: 'Export folder'},
+  {id: 'timecodes', name: 'Timecodes & monday'},
+  {id: 'agent', name: 'iconik Agent'},
+  {id: 'done', name: 'Ready'},
+];
+let step = 0, draft = null;
+
+function startSetup(at = 0) {
+  draft = JSON.parse(JSON.stringify(CFG || {}));
+  draft.shows = draft.shows || [];
+  draft.autoPush = draft.autoPush !== false;
+  draft.ytMode = draft.ytMode || 'auto';
+  step = at;
+  $('#main').classList.add('hidden'); $('#setup').classList.remove('hidden');
+  $('#steps').innerHTML = '<div class="brand">Push to Iconik<small>Jomboy Media · one-time setup</small></div>' +
+    STEPS.map((s, i) => `<button class="stepbtn" data-i="${i}"><span class="n">${i + 1}</span>${s.name}</button>`).join('');
+  $$('#steps .stepbtn').forEach(b => b.onclick = () => { const i = +b.dataset.i; if (i <= maxReach()) go(i); });
+  go(step);
+}
+function maxReach() { for (let i = 0; i < STEPS.length; i++) if (!stepOk(STEPS[i].id)) return i; return STEPS.length - 1; }
+function stepOk(id) {
+  if (id === 'key') return BOOT.hasKey;
+  if (id === 'you') return !!(draft.name && draft.role);
+  if (id === 'shows') return draft.shows.length > 0;
+  if (id === 'exports') return !!draft.exportFolder;
+  return true;
+}
+function go(i) {
+  step = i;
+  $$('#steps .stepbtn').forEach((b, j) => { b.classList.toggle('on', j === i); b.classList.toggle('done', j < i && stepOk(STEPS[j].id)); });
+  $('#stage').scrollTop = 0;
+  const id = STEPS[i].id;
+  $('#backBtn').style.visibility = i ? 'visible' : 'hidden';
+  $('#nextBtn').textContent = id === 'done' ? 'Start pushing' : id === 'welcome' ? 'Let’s set it up' : 'Continue';
+  PAGES[id]();
+  refreshNav();
+}
+function refreshNav() {
+  const id = STEPS[step].id, ok = stepOk(id);
+  $('#nextBtn').disabled = !ok;
+  $('#navnote').textContent = ok ? '' : ({key: 'Enter the team key to continue.', you: 'Pick your name and role.',
+    shows: 'Pick at least one show.', exports: 'Choose your export folder.'}[id] || '');
+}
+$('#backBtn').onclick = () => go(Math.max(0, step - 1));
+$('#nextBtn').onclick = async () => {
+  if (STEPS[step].id === 'done') return finishSetup();
+  go(step + 1);
+};
+
+const PAGES = {
+  welcome() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>Export it. <em>Double-click.</em> Done.</h1>
+      <p class="lede">Hey ${esc(/mac|admin|user|edit/i.test(BOOT.user || '') ? 'there' : (BOOT.user || '').split(' ')[0] || 'there')}. This app sends your finished export into the right Iconik folder, waits for the video to go up on YouTube, then fills in all the Iconik metadata and checks off the monday ad reads, with no copy-pasting.</p>
+      <div class="how">
+        <div><b>1</b><span>Finds your newest export and uploads it to the show's Iconik folder</span></div>
+        <div><b>2</b><span>Watches the show's YouTube channel until the video is published</span></div>
+        <div><b>3</b><span>Iconik Autofill fills creators, tags, sponsors, links and the thumbnail</span></div>
+        <div><b>4</b><span>monday ad reads get the YouTube link and timecode</span></div>
+      </div>
+      <div class="card"><h3>Setup takes about 3 minutes</h3>
+        <span class="muted">You'll need the <b>team key</b> (ask Rob Scirocco), the shows you work on, and where your exports go. You only do this once, and you can reopen it any time from <b>Setup</b>.</span></div>
+    </div>`;
+  },
+
+  key() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>Team <em>key</em></h1>
+      <p class="lede">The team key lets this app create assets in Iconik and update monday through the Iconik Autofill service. It's saved privately on this Mac (only your user account can read it). It's the same key the Iconik Autofill page asks for.</p>
+      <div class="card">
+        <div id="keyState"></div>
+        <div class="row" style="margin-top:12px" id="keyForm">
+          <input type="password" id="keyIn" class="grow" placeholder="Paste the team key" autocomplete="off">
+          <button class="gold" id="keySave">Check & save</button>
+        </div>
+        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Don't have it? Ask Rob Scirocco on Slack. Please don't post it in public channels.</p>
+      </div>
+    </div>`;
+    const paint = () => {
+      $('#keyState').innerHTML = BOOT.hasKey ? '<span class="pill ok">✓ Key saved on this Mac</span> <button class="link small" id="keyChange">Use a different key</button>'
+        : '<span class="pill warn">No key yet</span>';
+      $('#keyForm').classList.toggle('hidden', BOOT.hasKey);
+      const c = $('#keyChange'); if (c) c.onclick = () => { $('#keyForm').classList.remove('hidden'); $('#keyIn').focus(); };
+      refreshNav();
+    };
+    paint();
+    const save = async () => {
+      const b = $('#keySave'); b.disabled = true; b.innerHTML = '<span class="spinner"></span> Checking';
+      try { await native('setKey', {key: $('#keyIn').value}); BOOT.hasKey = true; $('#keyIn').value = ''; toast('Key works. Saved on this Mac.'); }
+      catch (e) { toast(String(e.message || e).replace(/^.*?: /, ''), true); }
+      b.disabled = false; b.textContent = 'Check & save'; paint();
+    };
+    $('#keySave').onclick = save;
+    $('#keyIn').onkeydown = (e) => { if (e.key === 'Enter') save(); };
+    if (!BOOT.hasKey) setTimeout(() => $('#keyIn').focus(), 50);
+  },
+
+  async you() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>About <em>you</em></h1>
+      <p class="lede">Your name goes in the Producer or Editor field of everything you push, so nobody has to fill it in later. These are the names Iconik already knows.</p>
+      <div class="card">
+        <div class="show" style="grid-template-columns:1fr">
+          <label>Your name<select id="meName"><option value="">Loading names from Iconik…</option></select></label>
+          <label id="otherWrap" class="hidden">Your name as it should appear<input type="text" id="meOther" placeholder="First Last"></label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>What do you usually do?</h3>
+        <div class="chips" id="roles" style="margin-top:8px">
+          <button class="chip" data-r="editor">Editor</button>
+          <button class="chip" data-r="producer">Producer</button>
+          <button class="chip" data-r="socials">Socials</button>
+        </div>
+        <p class="faint" id="roleNote" style="font-size:12.5px;margin:10px 0 0"></p>
+      </div>
+    </div>`;
+    const roleNote = {editor: 'Your name goes in Iconik’s Editor field. The producer is learned from the show’s past uploads.',
+      producer: 'Your name goes in Iconik’s Producer field. The editor is learned from the show’s past uploads.',
+      socials: 'Producer and Editor are learned from the show’s past uploads. You mostly push Shorts and clips.'};
+    const paintRoles = () => { $$('#roles .chip').forEach(c => c.classList.toggle('on', c.dataset.r === draft.role)); $('#roleNote').textContent = roleNote[draft.role] || ''; refreshNav(); };
+    $$('#roles .chip').forEach(c => c.onclick = () => { draft.role = c.dataset.r; paintRoles(); });
+    paintRoles();
+    try { PEOPLE = PEOPLE || await api('/app/people'); } catch (e) { toast(e.message, true); PEOPLE = {producers: [], editors: []}; }
+    const names = [...new Set([...PEOPLE.producers, ...PEOPLE.editors])].sort();
+    const sel = $('#meName');
+    const guess = draft.name || names.find(n => n.toLowerCase() === String(BOOT.user || '').toLowerCase()) || '';
+    sel.innerHTML = '<option value="">Pick your name…</option>' + names.map(n => `<option ${n === guess ? 'selected' : ''}>${esc(n)}</option>`).join('') + '<option value="__other">I’m not on this list</option>';
+    if (draft.name && !names.includes(draft.name)) { sel.value = '__other'; $('#otherWrap').classList.remove('hidden'); $('#meOther').value = draft.name; }
+    draft.name = draft.name || guess;
+    sel.onchange = () => { const o = sel.value === '__other'; $('#otherWrap').classList.toggle('hidden', !o); draft.name = o ? $('#meOther').value.trim() : sel.value; draft.nameInIconik = !o; refreshNav(); };
+    $('#meOther').oninput = () => { draft.name = $('#meOther').value.trim(); draft.nameInIconik = false; refreshNav(); };
+    draft.nameInIconik = names.includes(draft.name);
+    refreshNav();
+  },
+
+  async shows() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>Your <em>shows</em></h1>
+      <p class="lede">Pick every show you export for. Each one uploads into its folder under <b>Iconik › Channels</b>. If you work on more than one, give each a filename start (like <code>TB_</code>) so the app knows where each export goes.</p>
+      <div class="card"><div class="row" style="margin-bottom:10px"><input type="text" id="showFilter" class="grow" placeholder="Filter shows…"></div><div class="chips" id="chanChips"><span class="muted"><span class="spinner"></span> Loading the Iconik folders…</span></div></div>
+      <div id="showCards"></div>
+    </div>`;
+    try { FOLDERS = FOLDERS || (await api('/app/folders')).channels; } catch (e) { $('#chanChips').innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
+    const paintChips = () => {
+      const q = $('#showFilter').value.toLowerCase();
+      $('#chanChips').innerHTML = FOLDERS.filter(c => !q || c.title.toLowerCase().includes(q)).map(c =>
+        `<button class="chip ${draft.shows.some(s => s.channel === c.title) ? 'on' : ''}" data-c="${esc(c.title)}">${esc(c.title)}</button>`).join('');
+      $$('#chanChips .chip').forEach(b => b.onclick = () => {
+        const c = FOLDERS.find(f => f.title === b.dataset.c);
+        const i = draft.shows.findIndex(s => s.channel === c.title);
+        if (i >= 0) draft.shows.splice(i, 1);
+        else draft.shows.push({channel: c.title, channelId: c.id, seriesId: '', series: '', prefix: ''});
+        paintChips(); paintCards(); refreshNav();
+      });
+    };
+    $('#showFilter').oninput = paintChips;
+    const paintCards = () => {
+      const multi = draft.shows.length > 1;
+      $('#showCards').innerHTML = draft.shows.map((s, i) => {
+        const f = FOLDERS.find(x => x.title === s.channel) || {series: []};
+        return `<div class="card" data-i="${i}">
+          <div class="row"><h3 class="grow">${esc(s.channel)}</h3><button class="link small" data-rm="${i}">Remove</button></div>
+          <div class="show">
+            <label>Iconik folder
+              <select data-k="series"><option value="">${esc(s.channel)} (the channel folder)</option>${f.series.map(x => `<option value="${x.id}" ${x.id === s.seriesId ? 'selected' : ''}>${esc(s.channel)} › ${esc(x.title)}</option>`).join('')}</select></label>
+            <label>Export filenames start with ${multi ? '' : '<span class="faint">(optional)</span>'}
+              <input type="text" data-k="prefix" value="${esc(s.prefix)}" placeholder="e.g. ${esc(initials(s.channel))}"></label>
+          </div>
+          <div class="status" data-st="${i}"><div class="line muted"><span class="ic"><span class="spinner"></span></span>Checking monday and YouTube…</div></div>
+        </div>`;
+      }).join('');
+      $$('#showCards [data-rm]').forEach(b => b.onclick = () => { draft.shows.splice(+b.dataset.rm, 1); paintChips(); paintCards(); refreshNav(); });
+      $$('#showCards .card').forEach(card => {
+        const s = draft.shows[+card.dataset.i];
+        $('[data-k=series]', card).onchange = (e) => { s.seriesId = e.target.value; s.series = e.target.value ? e.target.selectedOptions[0].textContent.split(' › ')[1] : ''; };
+        $('[data-k=prefix]', card).oninput = (e) => { s.prefix = e.target.value.trim(); };
+        paintShowStatus(s, $('[data-st]', card));
+      });
+    };
+    paintChips(); paintCards();
+  },
+
+  async exports() {
+    if (!draft.exportFolder && BOOT.desktopExports) draft.exportFolder = BOOT.home + '/Desktop/EXPORTS';
+    $('#stage').innerHTML = `<div class="page">
+      <h1>Export <em>folder</em></h1>
+      <p class="lede">Where does Premiere (or Media Encoder) save your finished exports? The app picks the newest video in this folder each time you open it.</p>
+      <div class="card">
+        <div class="row"><code class="grow sel" id="folderPath" style="padding:8px 10px">${esc(draft.exportFolder || 'No folder chosen yet')}</code><button class="gold" id="pickFolder">Choose folder…</button></div>
+        <div id="folderFiles" class="files"></div>
+      </div>
+      <div class="card"><h3>Good to know</h3>
+        <ul class="muted" style="margin:6px 0 0;padding-left:18px">
+          <li>Push only when the export has finished. If it's still being written, the app waits until the file stops growing.</li>
+          <li>Name exports the way you already do. ${draft.shows.some(s => s.prefix) ? 'Files starting with ' + draft.shows.filter(s => s.prefix).map(s => `<code>${esc(s.prefix)}</code>`).join(', ') + ' go to their show automatically.' : 'If you add a filename start per show in the last step, files go to the right show automatically.'}</li>
+          <li>The Iconik asset is named after the file, so clean names help (for example <code>TB_November 22nd_Skubal Signs with Mets.mp4</code>).</li>
+          <li>You can also drop any video onto the app window or its icon.</li>
+          <li>If macOS asks to let <b>Push to Iconik</b> access your Desktop or Documents folder, click <b>Allow</b>. That's how it sees your exports.</li>
+        </ul></div>
+    </div>`;
+    const paint = async () => {
+      $('#folderPath').textContent = draft.exportFolder || 'No folder chosen yet';
+      refreshNav();
+      if (!draft.exportFolder) return;
+      const files = await native('listExports', {folder: draft.exportFolder, limit: 6});
+      $('#folderFiles').innerHTML = files.length ? '<div class="faint" style="font-size:12px;margin-top:4px">Newest videos here:</div>' + files.map(f => {
+        const s = showFor(f.name, draft);
+        return `<div class="f"><span class="nm">${esc(f.name)}</span><span class="faint">${ago(f.mtime)}</span>${s ? `<span class="pill ok">${esc(s.channel)}</span>` : draft.shows.length > 1 ? '<span class="pill">pick show when pushing</span>' : ''}</div>`;
+      }).join('') : '<div class="muted" style="margin-top:10px">No videos in this folder yet. That’s fine if you haven’t exported anything.</div>';
+    };
+    $('#pickFolder').onclick = async () => { const p = await native('pickFolder', {start: draft.exportFolder || '~/Desktop'}); if (p) { draft.exportFolder = p; paint(); } };
+    paint();
+  },
+
+  timecodes() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>Timecodes <em>&</em> monday</h1>
+      <p class="lede">When the video goes live, Autofill reads the show's YouTube captions to find where each sponsor is mentioned. Then it writes that timecode and the YouTube link onto the ad read on the show's monday board, and marks it Published.</p>
+      <div id="tcCards"></div>
+      <div class="card"><h3>What makes timecodes work</h3>
+        <ul class="muted" style="margin:6px 0 0;padding-left:18px">
+          <li><b>The channel is connected once.</b> Someone who manages the show’s YouTube channel (owner or manager of the Brand Account) opens the connect link and picks the channel. Your own YouTube login doesn’t need anything.</li>
+          <li><b>YouTube captions are on.</b> Automatic captions are on by default. Don’t turn them off in YouTube Studio. Captions can take a little while after publishing, so the app waits 30 minutes after a long video goes public before it fills metadata.</li>
+          <li><b>The ad read is on monday.</b> The read needs to be a subitem under the episode, with the episode's publish date on the board. Autofill matches it by sponsor name.</li>
+          <li><b>Editors’ own timecodes are kept.</b> If someone already typed a timecode on monday, Autofill leaves it alone.</li>
+        </ul></div>
+      <div class="row"><button id="tcRecheck">Check again</button></div>
+    </div>`;
+    const paint = () => {
+      $('#tcCards').innerHTML = draft.shows.map((s, i) => `<div class="card"><h3>${esc(s.channel)}</h3><div class="status" style="margin-top:4px;border:0;padding:0" data-tc="${i}"><div class="line muted"><span class="ic"><span class="spinner"></span></span>Checking…</div></div></div>`).join('');
+      draft.shows.forEach((s, i) => paintShowStatus(s, $(`[data-tc="${i}"]`), true));
+    };
+    $('#tcRecheck').onclick = () => { draft.shows.forEach(s => delete SHOWINFO[s.channel]); paint(); };
+    paint();
+  },
+
+  async agent() {
+    $('#stage').innerHTML = `<div class="page">
+      <h1>iconik <em>Agent</em></h1>
+      <p class="lede">The iconik Agent is Iconik's own Mac app. It lets you open and download Iconik media straight into Premiere, and it's how the rest of the team pulls footage. This app uploads on its own, but everyone on the team should have the Agent.</p>
+      <div class="card" id="agentCard"><span class="spinner"></span></div>
+      <div class="card"><h3>Installing it</h3>
+        <ol class="muted" style="margin:6px 0 0;padding-left:18px">
+          <li>Click <b>Download iconik Agent</b>. Iconik’s help page has the Mac download (pick <b>Apple Silicon</b> for M-series Macs, <b>Intel</b> otherwise).</li>
+          <li>Unzip it and drag <b>iconik Agent.app</b> into Applications, then open it.</li>
+          <li>Sign in with your Jomboy Iconik login (<code>app.iconik.io</code>). The Agent lives in your menu bar.</li>
+          <li>Come back here and press <b>Check again</b>.</li>
+        </ol></div>
+    </div>`;
+    const paint = async () => {
+      const a = await native('agent');
+      $('#agentCard').innerHTML = `<div class="row">
+        ${a.installed ? `<span class="pill ok">✓ Installed</span> ${a.running ? '<span class="pill ok">✓ Running</span>' : '<span class="pill warn">Not running</span>'}` : '<span class="pill warn">Not installed</span>'}
+        <div class="grow"></div>
+        ${a.installed && !a.running ? '<button id="agentOpen">Open iconik Agent</button>' : ''}
+        ${a.installed ? '' : '<button class="gold" id="agentDl">Download iconik Agent</button>'}
+        <button id="agentCheck">Check again</button></div>
+        ${a.installed ? '' : '<p class="faint" style="font-size:12.5px;margin:10px 0 0">You can skip this and still push. Install it when you get a minute.</p>'}`;
+      const o = $('#agentOpen'); if (o) o.onclick = async () => { await native('openApp', {path: '/Applications/iconik Agent.app'}); setTimeout(paint, 2500); };
+      const d = $('#agentDl'); if (d) d.onclick = () => native('open', {url: AGENT_HELP});
+      $('#agentCheck').onclick = paint;
+    };
+    paint();
+  },
+
+  done() {
+    const tips = [];
+    $('#stage').innerHTML = `<div class="page">
+      <h1>You’re <em>ready</em></h1>
+      <p class="lede">From now on: export, double-click <b>Push to Iconik</b>, and you're done. You can close the window and the app keeps working in your Dock. It sends a notification when the metadata is in.</p>
+      <div class="card">
+        <h3>Keep it handy</h3>
+        <div class="row" style="margin-top:8px">
+          ${BOOT.inApplications ? '<span class="pill ok">✓ In Applications</span>' : '<button id="install">Move to Applications</button>'}
+          ${BOOT.onDesktop ? '<span class="pill ok">✓ On your Desktop</span>' : '<button id="alias">Put an icon on my Desktop</button>'}
+        </div>
+        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Tip: right-click the Dock icon → Options → <b>Keep in Dock</b>.</p>
+      </div>
+      <div class="card">
+        <h3>How it behaves</h3>
+        <label class="toggle" style="margin-top:8px"><input type="checkbox" id="autoPush" ${draft.autoPush ? 'checked' : ''}> Push the newest export automatically when I open the app (with a few seconds to cancel)</label>
+        <div style="margin-top:12px" class="muted">Finding the YouTube video</div>
+        <div class="ytmode" style="margin-top:6px">
+          <label><input type="radio" name="dym" value="auto" ${draft.ytMode === 'auto' ? 'checked' : ''}> Find it automatically</label>
+          <label><input type="radio" name="dym" value="paste" ${draft.ytMode === 'paste' ? 'checked' : ''}> I’ll paste the link</label>
+          <label><input type="radio" name="dym" value="none" ${draft.ytMode === 'none' ? 'checked' : ''}> Upload only</label>
+        </div>
+      </div>
+      <div class="card"><h3>Your setup</h3><div class="muted" style="font-size:13px">
+        ${esc(draft.name)} · ${esc(draft.role)}<br>
+        ${draft.shows.map(s => `${esc(s.channel)}${s.series ? ' › ' + esc(s.series) : ''}${s.prefix ? ` <code>${esc(s.prefix)}…</code>` : ''}`).join('<br>')}<br>
+        Exports: <code>${esc(draft.exportFolder)}</code></div></div>
+    </div>`;
+    const i = $('#install'); if (i) i.onclick = async () => { await saveDraft(); try { await native('install'); } catch (e) { toast(e.message, true); } };
+    const a = $('#alias'); if (a) a.onclick = async () => { try { await native('desktopAlias'); BOOT.onDesktop = true; toast('Added “Push to Iconik” to your Desktop.'); PAGES.done(); } catch (e) { toast(e.message, true); } };
+    $('#autoPush').onchange = (e) => draft.autoPush = e.target.checked;
+    $$('[name=dym]').forEach(r => r.onchange = () => draft.ytMode = r.value);
+  },
+};
+
+// monday board + YouTube channel + captions status for one show (used on Shows and Timecodes steps).
+async function paintShowStatus(s, el, timecodesView) {
+  let info = SHOWINFO[s.channel];
+  try { if (!info) info = SHOWINFO[s.channel] = await api('/app/show?channel=' + encodeURIComponent(s.channel)); }
+  catch (e) { el.innerHTML = `<div class="line bad"><span class="ic">!</span>${esc(e.message)}</div>`; return; }
+  if (info.youtube) s.youtube = {id: info.youtube.id, title: info.youtube.title, handle: info.youtube.handle};
+  const yt = info.youtube, lines = [];
+  lines.push(info.boards.length
+    ? `<div class="line"><span class="ic ok">✓</span><div>monday: ${info.boards.map(b => `<a href="${esc(b.url)}">${esc(b.show)} board</a>`).join(' + ')}. Ad reads get their YouTube link and timecode.</div></div>`
+    : `<div class="line"><span class="ic faint">–</span><div class="muted">No monday ad-read board for this channel, so monday is skipped. Iconik still gets everything.</div></div>`);
+  lines.push(yt
+    ? `<div class="line"><span class="ic ok">✓</span><div class="yt">${yt.thumb ? `<img src="${esc(yt.thumb)}">` : ''}<div>YouTube: <b>${esc(yt.title)}</b> <span class="faint">${esc(yt.handle)}</span> <button class="link small" data-ytfix>Wrong channel?</button></div></div></div>`
+    : `<div class="line"><span class="ic warn">!</span><div>Couldn't find this show's YouTube channel. <button class="link small" data-ytfix>Set it</button></div></div>`);
+  lines.push(yt && yt.connected
+    ? `<div class="line"><span class="ic ok">✓</span><div>Captions connected, so ad-read timecodes fill in automatically.</div></div>`
+    : `<div class="line"><span class="ic warn">!</span><div>Captions aren’t connected for this channel yet, so timecodes stay blank (everything else still works). <b>A channel manager</b> opens the connect link once and picks <b>${esc(yt ? yt.title : s.channel)}</b>.
+        <div class="row" style="margin-top:6px"><button class="small" data-copy>Copy connect link</button><button class="small" data-openc>I manage it: connect now</button></div></div></div>`);
+  if (timecodesView && !info.boards.length) lines.push('<div class="line faint"><span class="ic"></span><div>Ad-read timecodes only go to monday, so with no board there’s nothing to write.</div></div>');
+  el.innerHTML = lines.join('');
+  const fix = $('[data-ytfix]', el);
+  if (fix) fix.onclick = () => {
+    fix.parentElement.innerHTML += `<div class="row" style="margin-top:6px"><input type="text" class="grow" placeholder="@handle or channel link" data-ytin><button class="small gold" data-ytsave>Save</button></div>`;
+    const inp = $('[data-ytin]', el);
+    $('[data-ytsave]', el).onclick = async () => {
+      let v = inp.value.trim().replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^channel\//, '').replace(/\/.*$/, '');
+      try { await api('/app/youtube/save', {body: {channel: s.channel, youtube: v}}); delete SHOWINFO[s.channel]; toast('Saved for everyone on the team.'); paintShowStatus(s, el, timecodesView); }
+      catch (e) { toast(e.message, true); }
+    };
+  };
+  const cp = $('[data-copy]', el); if (cp) cp.onclick = async () => { await native('copy', {text: info.connectUrl}); toast('Copied. Send it to whoever manages the channel.'); };
+  const oc = $('[data-openc]', el); if (oc) oc.onclick = () => native('open', {url: info.connectUrl});
+}
+
+async function saveDraft() { CFG = draft; CFG.setupDone = true; await saveCfg(); }
+async function finishSetup() { await saveDraft(); showMain(true); }
+
+/* =====================================================================
+   MAIN
+   ===================================================================== */
+function showFor(name, cfg = CFG) {
+  const shows = (cfg && cfg.shows) || [];
+  const lower = name.toLowerCase();
+  const hit = shows.filter(s => s.prefix && lower.startsWith(s.prefix.toLowerCase())).sort((a, b) => b.prefix.length - a.prefix.length)[0];
+  if (hit) return hit;
+  if (shows.length === 1) return shows[0];
+  return null;
+}
+const fileKey = (f) => f.name + '|' + f.size;
+const pushedJob = (f) => JOBS.find(j => j.key === fileKey(f) && j.state !== 'error' && j.state !== 'cancelled');
+
+let pickShow = null, pickSeries = null, ytMode = 'auto';
+function selectFile(f) {
+  SEL = f;
+  const s = f && showFor(f.name);
+  pickShow = s ? s.channel : (CFG.lastShow && CFG.shows.some(x => x.channel === CFG.lastShow) ? CFG.lastShow : CFG.shows[0].channel);
+  pickSeries = null;
+  ytMode = CFG.ytMode || 'auto';
+  cancelAuto();
+  paintMain();
+}
+
+function paintMain() {
+  $('#who').textContent = `${CFG.name} · ${CFG.role[0].toUpperCase() + CFG.role.slice(1)}`;
+  $('#folderName').textContent = CFG.exportFolder.replace(BOOT.home, '~');
+  const f = SEL;
+  if (!f) {
+    $('#nextCard').innerHTML = `<div id="next"><div class="empty">No videos in <code>${esc(CFG.exportFolder.replace(BOOT.home, '~'))}</code> yet.<br>Export something, or drop a file here.</div></div>`;
+  } else {
+    const show = CFG.shows.find(s => s.channel === pickShow) || CFG.shows[0];
+    const folder = (FOLDERS || []).find(x => x.title === show.channel);
+    const seriesId = pickSeries ?? show.seriesId;
+    const series = folder ? folder.series : (show.seriesId ? [{id: show.seriesId, title: show.series}] : []);
+    const done = pushedJob(f);
+    $('#nextCard').innerHTML = `<div id="next">
+      <div class="fname sel">${esc(f.name)}</div>
+      <div class="meta">${fmtSize(f.size)}${f.seconds ? ' · ' + fmtDur(f.seconds) : ''} · exported ${ago(f.mtime)}</div>
+      <div class="dest">
+        <span class="k">Show</span>
+        <div class="row"><select id="pShow">${CFG.shows.map(s => `<option ${s.channel === show.channel ? 'selected' : ''}>${esc(s.channel)}</option>`).join('')}${(FOLDERS || []).filter(x => !CFG.shows.some(s => s.channel === x.title)).length ? '<option value="__more">Another show…</option>' : ''}</select>
+          <select id="pSeries"><option value="">Channel folder</option>${series.map(x => `<option value="${x.id}" ${x.id === seriesId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
+        <span class="k">YouTube</span>
+        <div class="ytmode">
+          <label><input type="radio" name="ym" value="auto" ${ytMode === 'auto' ? 'checked' : ''}> Find it automatically</label>
+          <label><input type="radio" name="ym" value="paste" ${ytMode === 'paste' ? 'checked' : ''}> Paste link</label>
+          <label><input type="radio" name="ym" value="none" ${ytMode === 'none' ? 'checked' : ''}> Upload only</label>
+        </div>
+        <span class="k ${ytMode === 'paste' ? '' : 'hidden'}">Link</span>
+        <input type="text" id="pLink" class="${ytMode === 'paste' ? '' : 'hidden'}" placeholder="https://www.youtube.com/watch?v=…  (you can also add it later)">
+      </div>
+      <button class="gold" id="pushBtn">Push to Iconik</button>
+      ${done ? `<div class="already warn">Already pushed ${ago(done.created)}. Pushing again makes a second Iconik asset.</div>` : ''}
+      <div id="autoSlot"></div>
+    </div>`;
+    $('#pShow').onchange = (e) => {
+      if (e.target.value === '__more') { const extra = prompt('Which channel? Type it exactly as it appears in Iconik › Channels:\n\n' + FOLDERS.map(x => x.title).join(', '));
+        const c = extra && FOLDERS.find(x => x.title.toLowerCase() === extra.trim().toLowerCase());
+        if (c) { CFG.shows.push({channel: c.title, channelId: c.id, seriesId: '', series: '', prefix: ''}); saveCfg(); pickShow = c.title; } paintMain(); return; }
+      pickShow = e.target.value; pickSeries = null; paintMain();
+    };
+    $('#pSeries').onchange = (e) => { pickSeries = e.target.value; };
+    $$('[name=ym]').forEach(r => r.onchange = () => { ytMode = r.value; paintMain(); });
+    $('#pushBtn').onclick = () => push();
+    if (autoTimer) paintAuto();
+  }
+  $('#recent').innerHTML = EXPORTS.slice(0, 12).map((x, i) => {
+    const s = showFor(x.name), d = pushedJob(x);
+    return `<div class="r ${SEL && fileKey(SEL) === fileKey(x) ? 'on' : ''}" data-i="${i}"><span class="nm">${esc(x.name)}</span>${d ? '<span class="pill ok">pushed</span>' : s && CFG.shows.length > 1 ? `<span class="pill">${esc(s.channel)}</span>` : ''}<span class="tm">${ago(x.mtime)}</span></div>`;
+  }).join('') || '<div class="faint">Nothing here yet.</div>';
+  $$('#recent .r').forEach(r => r.onclick = () => selectFile(EXPORTS[+r.dataset.i]));
+  paintJobs();
+}
+
+async function loadExports() {
+  EXPORTS = await native('listExports', {folder: CFG.exportFolder, limit: 25});
+  return EXPORTS;
+}
+
+/* ---------- auto push on open ---------- */
+let autoTimer = null, autoLeft = 0;
+function paintAuto() {
+  const slot = $('#autoSlot'); if (!slot) return;
+  slot.innerHTML = autoTimer ? `<div id="auto"><b>${autoLeft}</b><span class="grow">Pushing this export automatically…</span><button class="small" id="autoGo">Push now</button><button class="small" id="autoStop">Cancel</button></div>` : '';
+  if (autoTimer) { $('#autoStop').onclick = cancelAuto; $('#autoGo').onclick = () => { cancelAuto(); push(); }; }
+}
+function cancelAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; paintAuto(); } }
+function maybeAutoPush() {
+  if (!CFG.autoPush || !SEL || pushedJob(SEL)) return;
+  if (Date.now() - SEL.mtime > 12 * 3600e3) return;             // only fresh exports
+  if (!showFor(SEL.name)) return;                               // ambiguous show: let them pick
+  autoLeft = 8;
+  autoTimer = setInterval(() => { autoLeft--; if (autoLeft <= 0) { cancelAuto(); push(); } else paintAuto(); }, 1000);
+  paintAuto();
+}
+
+/* ---------- jobs ---------- */
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function push(file = SEL) {
+  if (!file) return;
+  cancelAuto();
+  const show = CFG.shows.find(s => s.channel === pickShow) || CFG.shows[0];
+  const seriesId = pickSeries ?? show.seriesId;
+  const collection = seriesId || show.channelId;
+  const seriesName = seriesId ? (((FOLDERS || []).find(x => x.title === show.channel) || {series: []}).series.find(x => x.id === seriesId) || {title: show.series}).title : '';
+  const link = ytMode === 'paste' ? ($('#pLink') ? $('#pLink').value.trim() : '') : '';
+  const job = {id: newId(), key: fileKey(file), path: file.path, name: file.name, size: file.size, seconds: file.seconds || 0, mtime: file.mtime,
+    channel: show.channel, series: seriesName, collection, youtube: show.youtube || null, ytMode, yt: link || null,
+    state: 'uploading', phase: 'checking', sent: 0, created: Date.now()};
+  JOBS.unshift(job);
+  CFG.lastShow = show.channel; saveCfg();
+  saveJobs();
+  native('upload', {jobId: job.id, path: job.path, collection});
+  paintMain();
+}
+const job = (id) => JOBS.find(j => j.id === id);
+
+handlers.upload = (e) => {
+  const j = job(e.jobId); if (!j) return;
+  j.phase = e.phase;
+  if (e.total) j.size = e.total;
+  if (e.sent != null) j.sent = e.sent;
+  if (e.assetUrl) j.assetUrl = e.assetUrl;
+  if (e.phase === 'done') {
+    j.assetId = e.assetId; j.assetUrl = e.assetUrl; j.uploaded = Date.now();
+    native('notify', {title: 'Uploaded to Iconik', body: `${j.name} is in ${j.channel}${j.series ? ' › ' + j.series : ''}.`});
+    afterUpload(j);
+  } else if (e.phase === 'error') { j.state = 'error'; j.error = 'Upload failed: ' + e.error; j.failedAt = 'upload';
+    native('notify', {title: 'Upload failed', body: j.name + ': ' + e.error}); }
+  else if (e.phase === 'cancelled') { j.state = 'cancelled'; }
+  saveJobs(); paintJobs(); updateBadge();
+};
+
+function afterUpload(j) {
+  if (j.yt) return readyToFill(j, j.yt);
+  if (j.ytMode === 'none') { j.state = 'done'; j.note = 'Uploaded only. Add the YouTube link any time to fill the metadata.'; return; }
+  if (j.ytMode === 'paste') { j.state = 'needlink'; return; }
+  if (!j.youtube) { j.state = 'needlink'; j.note = 'This show has no YouTube channel set, so paste the link.'; return; }
+  j.state = 'waiting'; j.waitSince = Date.now();
+  pollYouTube(true);
+}
+
+/* ---------- finding the YouTube video ---------- */
+const STOP = new Set('the a an and or of to in on for with at by from is are be was it its this that vs x ft feat full final edit export v1 v2 v3 v4 final2 mp4 mov new'.split(' '));
+const MONTHS = /^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)$/;
+function words(s) {
+  return new Set(String(s).toLowerCase().replace(/\.[a-z0-9]{2,4}$/, '').replace(/[’']/g, '').split(/[^a-z0-9$]+/)
+    .filter(w => w && !STOP.has(w) && !MONTHS.test(w) && !/^\d{1,2}(st|nd|rd|th)?$/.test(w) && !/^20\d\d$/.test(w)));
+}
+function scoreVideo(j, v) {
+  if (v.live !== 'none') return {s: -1};
+  const pub = Date.parse(v.published);
+  if (pub < j.mtime - 14 * 864e5) return {s: -1};
+  const older = pub < j.mtime - 3 * 864e5;                           // a re-export of something already up: length must match
+  let s = 0; const why = [];
+  if (j.seconds && v.seconds) {
+    const d = Math.abs(j.seconds - v.seconds);
+    if (d <= 2.5) { s += 100; why.push('same length'); }
+    else if (d <= 20) { s += 35; why.push('about the same length'); }
+    else if ((j.seconds <= 180) !== (v.seconds <= 180)) s -= 60;      // Short vs long video
+  }
+  const prefix = (CFG.shows.find(x => x.channel === j.channel) || {}).prefix || '';
+  const fw = words(j.name.slice(prefix && j.name.toLowerCase().startsWith(prefix.toLowerCase()) ? prefix.length : 0)), tw = words(v.title);
+  const hit = [...fw].filter(w => tw.has(w));
+  if (fw.size) { const r = hit.length / Math.min(fw.size, 6); s += Math.round(60 * Math.min(1, r)); if (hit.length) why.push('title shares “' + hit.slice(0, 3).join(' ') + '”'); }
+  const ep = j.name.match(/(?:ep(?:isode)?\.?\s*|#|\|\s*)(\d{2,4})\b/i);
+  if (ep && new RegExp('[|#]\\s*' + ep[1] + '\\b').test(v.title)) { s += 100; why.push('episode ' + ep[1]); }
+  if (older && !why.includes('same length')) return {s: -1};
+  return {s, why};
+}
+const usedVideos = () => new Set(JOBS.filter(j => j.yt).map(j => (j.yt.match(/[\w-]{11}/) || [])[0]));
+
+let pollT = null, polling = false;
+async function pollYouTube(now) {
+  clearTimeout(pollT);
+  const waiting = JOBS.filter(j => j.state === 'waiting');
+  const nextIn = () => { const youngest = Math.min(...JOBS.filter(j => j.state === 'waiting' || j.state === 'captions').map(j => Date.now() - (j.waitSince || j.created)));
+    return youngest < 6 * 3600e3 ? 3 * 60e3 : 15 * 60e3; };
+  if (!waiting.length) { checkCaptionWaits(); if (JOBS.some(j => j.state === 'captions')) pollT = setTimeout(pollYouTube, 60e3); return; }
+  if (polling) return; polling = true;
+  try {
+    const byChan = {};
+    waiting.forEach(j => (byChan[j.youtube.id] = byChan[j.youtube.id] || []).push(j));
+    for (const [cid, list] of Object.entries(byChan)) {
+      let vids;
+      try { vids = (await api('/app/youtube/recent?channel=' + cid)).videos; } catch (e) { list.forEach(j => j.lastErr = e.message); continue; }
+      const used = usedVideos();
+      for (const j of list) {
+        j.lastCheck = Date.now(); j.lastErr = null;
+        const scored = vids.filter(v => !used.has(v.id)).map(v => ({v, ...scoreVideo(j, v)})).filter(x => x.s > 0).sort((a, b) => b.s - a.s);
+        const [a, b] = scored;
+        if (a && a.s >= 100 && (!b || a.s - b.s >= 40)) {
+          j.match = {id: a.v.id, title: a.v.title, why: a.why.join(', ')};
+          used.add(a.v.id);
+          readyToFill(j, a.v.url, a.v);
+        } else if (a && a.s >= 35 && Date.now() - (j.waitSince || 0) > 20 * 60e3) {
+          // Something that might be it, but not sure: ask (once).
+          j.cands = scored.slice(0, 4).map(x => ({id: x.v.id, url: x.v.url, title: x.v.title, thumb: x.v.thumb, published: x.v.published, seconds: x.v.seconds, why: x.why.join(', ')}));
+          if (j.state !== 'pick') { j.state = 'pick'; native('notify', {title: 'Which video is it?', body: `Pick the YouTube video for ${j.name}.`}); native('bounce'); }
+        }
+      }
+    }
+  } finally {
+    polling = false; saveJobs(); paintJobs(); updateBadge();
+    if (JOBS.some(j => j.state === 'waiting' || j.state === 'captions')) pollT = setTimeout(pollYouTube, nextIn());
+  }
+}
+
+// Long videos: give YouTube's automatic captions ~30 min after going public, so ad-read timecodes can be found.
+function readyToFill(j, url, v) {
+  j.yt = url;
+  if (v) { j.ytTitle = v.title; j.ytPublished = Date.parse(v.published); }
+  const long = (v ? v.seconds : j.seconds) > 180;
+  const since = j.ytPublished ? Date.now() - j.ytPublished : Infinity;
+  if (long && since < 30 * 60e3 && SHOWINFO_CONNECTED(j.channel)) {
+    j.state = 'captions'; j.fillAt = j.ytPublished + 30 * 60e3;
+    clearTimeout(pollT); pollT = setTimeout(pollYouTube, 60e3);
+  } else fill(j);
+  saveJobs(); paintJobs();
+}
+const SHOWINFO_CONNECTED = (ch) => { const s = CFG.shows.find(x => x.channel === ch); return !(s && s.captions === false); };
+function checkCaptionWaits() { JOBS.filter(j => j.state === 'captions' && Date.now() >= j.fillAt).forEach(fill); }
+
+function fill(j, front) {
+  if (!j.assetUrl || !j.yt) return;
+  j.state = 'filling'; j.fillStarted = Date.now(); j.error = null;
+  const q = new URLSearchParams({yt: j.yt, asset: j.assetUrl, auto: '1'});
+  if (CFG.nameInIconik !== false && (CFG.role === 'editor' || CFG.role === 'producer')) { q.set('me', CFG.name); q.set('role', CFG.role); }
+  native('autofill', {jobId: j.id, url: AUTOFILL + '?' + q, title: 'Iconik Autofill · ' + j.name, front: !!front});
+  saveJobs(); paintJobs(); updateBadge();
+}
+handlers.autofill = (m) => {
+  const j = job(m.jobId); if (!j) return;
+  if (m.pageError && j.state === 'filling') { j.pageErr = m.pageError; return; }
+  if (m.dry || m.status == null) return;
+  const b = m.body || {};
+  if (m.status >= 200 && m.status < 300 && !b.error && !b.pick) {
+    j.state = 'done'; j.filled = Date.now();
+    j.written = (b.written || []).length; j.skipped = (b.skipped || []).map(x => x.field + (x.why ? ' (' + x.why + ')' : ''));
+    native('notify', {title: 'Metadata is in Iconik ✓', body: `${j.name}${j.skipped.length ? ' · check: ' + j.skipped.slice(0, 2).join(', ') : ''}`});
+    setTimeout(() => j.state === 'done' && !j.keepOpen && native('closeAutofill', {jobId: j.id}), 6000);
+  } else {
+    j.state = 'error'; j.failedAt = 'fill'; j.error = 'Metadata push failed: ' + (b.error || b.why || ('HTTP ' + m.status));
+    native('notify', {title: 'Metadata push failed', body: j.name + ': ' + (b.error || b.why || m.status)});
+  }
+  saveJobs(); paintJobs(); updateBadge();
+};
+handlers.autofillClosed = (m) => {
+  const j = job(m.jobId);
+  if (j && j.state === 'filling') { j.state = 'error'; j.failedAt = 'fill'; j.error = 'The Autofill window closed before it pushed. Press “Fill metadata” to run it again.'; saveJobs(); paintJobs(); updateBadge(); }
+};
+// Autofill that never answers (page stuck): flag it after 4 minutes.
+setInterval(() => { JOBS.filter(j => j.state === 'filling' && Date.now() - j.fillStarted > 4 * 60e3).forEach(j => {
+  j.state = 'error'; j.failedAt = 'fill'; j.error = 'Autofill didn’t finish' + (j.pageErr ? ' (' + j.pageErr + ')' : '') + '. Open it to check, or try again.'; saveJobs(); paintJobs(); }); }, 30e3);
+
+function updateBadge() {
+  const n = JOBS.filter(j => j.state === 'pick' || j.state === 'needlink' || j.state === 'error').length;
+  native('badge', {text: n ? String(n) : ''});
+}
+
+/* ---------- job cards ---------- */
+const STEPN = {uploading: 0, waiting: 1, pick: 1, needlink: 1, captions: 1, filling: 2, done: 3};
+function paintJobs() {
+  const el = $('#jobs'); if (!el) return;
+  if (!JOBS.length) { el.innerHTML = '<div class="empty">Nothing pushed yet.<br>Your uploads and their progress show up here.</div>'; return; }
+  el.innerHTML = JOBS.slice(0, 25).map(j => {
+    const n = j.state === 'error' ? (j.failedAt === 'fill' ? 2 : j.failedAt === 'upload' ? 0 : 1) : STEPN[j.state] ?? 0;
+    const pct = j.size ? Math.min(100, Math.round(100 * (j.sent || 0) / j.size)) : 0;
+    const seg = (i) => {
+      if (j.state === 'cancelled') return '<div></div>';
+      if (j.state === 'done' && i <= (j.ytMode === 'none' && !j.filled ? 0 : 2)) return '<div class="done"></div>';
+      if (i < n) return '<div class="done"></div>';
+      if (i === n && j.state === 'error') return '<div class="err"></div>';
+      if (i === n && j.state !== 'done') return `<div class="now ${i === 0 && j.phase === 'uploading' ? '' : 'spin'}" style="--p:${pct}%"><i></i></div>`;
+      return '<div></div>';
+    };
+    let msg = '', acts = [], extra = '';
+    switch (j.state) {
+      case 'uploading':
+        msg = {checking: 'Checking the export…', writing: 'Export is still being written. Waiting for it to finish…', starting: 'Creating the Iconik asset…',
+          uploading: `Uploading · ${pct}% of ${fmtSize(j.size)}`, finishing: 'Finishing up in Iconik…'}[j.phase] || 'Uploading…';
+        acts.push(`<button class="small" data-a="cancel">Cancel</button>`); break;
+      case 'waiting':
+        msg = `<span class="spinner"></span> Waiting for it on <b>${esc(j.youtube ? j.youtube.title : 'YouTube')}</b>${j.lastCheck ? ` · checked ${ago(j.lastCheck)}` : ''}${j.lastErr ? ` <span class="bad">(${esc(j.lastErr)})</span>` : ''}`;
+        extra = pasteBox(j); acts.push(`<button class="small" data-a="check">Check now</button>`); break;
+      case 'pick':
+        msg = '<b>Which YouTube video is this?</b>';
+        extra = `<div class="cands">${(j.cands || []).map(c => `<div class="cand" data-pick="${esc(c.url)}"><img src="${esc(c.thumb)}"><div><div class="ct">${esc(c.title)}</div><div class="cm">${fmtDur(c.seconds)} · ${ago(Date.parse(c.published))}${c.why ? ' · ' + esc(c.why) : ''}</div></div></div>`).join('')}</div>` + pasteBox(j);
+        acts.push(`<button class="small" data-a="notyet">None of these, keep waiting</button>`); break;
+      case 'needlink':
+        msg = j.note || 'Uploaded. Paste the YouTube link when it’s up to fill the metadata.'; extra = pasteBox(j, true); break;
+      case 'captions':
+        msg = `<span class="spinner"></span> Found it: <b>${esc(j.ytTitle || j.yt)}</b>. Giving YouTube captions time so ad-read timecodes can be found (fills ${new Date(j.fillAt).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}).`;
+        acts.push(`<button class="small" data-a="fillnow">Fill now</button>`); break;
+      case 'filling':
+        msg = '<span class="spinner"></span> Iconik Autofill is filling and pushing the metadata…'; acts.push(`<button class="small" data-a="viewfill">Show Autofill</button>`); break;
+      case 'done':
+        msg = j.filled ? `<span class="ok">✓ Done.</span> ${j.written ? j.written + ' fields written' : 'Metadata pushed'}${j.skipped && j.skipped.length ? `. <span class="warn">Check: ${esc(j.skipped.join(', '))}</span>` : ''}` : `<span class="ok">✓ Uploaded.</span> <span class="muted">${esc(j.note || '')}</span>`;
+        if (!j.filled) extra = pasteBox(j, true);
+        break;
+      case 'error':
+        msg = `<span class="bad">${esc(j.error)}</span>`;
+        acts.push(j.failedAt === 'upload' || !j.assetUrl ? `<button class="small gold" data-a="retry">Try again</button>` : `<button class="small gold" data-a="fill">Fill metadata</button>`);
+        if (j.assetUrl && j.yt) acts.push(`<button class="small" data-a="openfill">Open in Autofill</button>`);
+        break;
+      case 'cancelled': msg = '<span class="muted">Cancelled.</span>'; acts.push(`<button class="small" data-a="retry">Push again</button>`); break;
+    }
+    if (j.assetUrl && j.state !== 'uploading') acts.push(`<button class="small" data-open="${esc(j.assetUrl)}">Open in Iconik</button>`);
+    if (j.yt) acts.push(`<button class="small" data-open="${esc(j.yt)}">YouTube</button>`);
+    if (j.match && j.match.why && j.state !== 'pick') extra += `<div class="faint" style="font-size:11.5px;margin-top:6px">Matched by ${esc(j.match.why)}.</div>`;
+    if (['done', 'error', 'cancelled'].includes(j.state)) acts.push(`<button class="small link" data-a="remove" style="margin-left:auto">Remove</button>`);
+    return `<div class="job" data-id="${j.id}">
+      <div class="top"><div class="t">${esc(j.name)}<div class="sub">${esc(j.channel)}${j.series ? ' › ' + esc(j.series) : ''} · ${ago(j.created)}</div></div></div>
+      <div class="track">${seg(0)}${seg(1)}${seg(2)}</div>
+      <div class="trackl"><span>Upload</span><span>YouTube</span><span>Metadata</span></div>
+      <div class="msg">${msg}</div>${extra}
+      ${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+  $$('#jobs .job').forEach(card => {
+    const j = job(card.dataset.id);
+    $$('[data-open]', card).forEach(b => b.onclick = () => native('open', {url: b.dataset.open}));
+    $$('[data-pick]', card).forEach(c => c.onclick = () => { const cand = j.cands.find(x => x.url === c.dataset.pick); j.match = {id: cand.id, title: cand.title, why: 'you picked it'}; readyToFill(j, cand.url, {title: cand.title, published: cand.published, seconds: cand.seconds}); updateBadge(); });
+    const pb = $('[data-paste]', card);
+    if (pb) { const go = () => { const v = $('[data-pastein]', card).value.trim(); if (!/(youtu\.be\/|v=|shorts\/|live\/)[\w-]{11}|^[\w-]{11}$/.test(v)) return toast('That doesn’t look like a YouTube link.', true);
+      j.match = {why: 'pasted link'}; if (j.assetUrl) { j.yt = v; fill(j, true); } else j.yt = v; updateBadge(); };
+      pb.onclick = go; $('[data-pastein]', card).onkeydown = (e) => e.key === 'Enter' && go(); }
+    $$('[data-a]', card).forEach(b => b.onclick = () => {
+      const a = b.dataset.a;
+      if (a === 'cancel') native('cancelUpload', {jobId: j.id});
+      if (a === 'check') { j.waitSince = j.waitSince || Date.now(); pollYouTube(true); toast('Checking YouTube…'); }
+      if (a === 'notyet') { j.state = 'waiting'; j.cands = null; j.waitSince = Date.now(); saveJobs(); paintJobs(); updateBadge(); }
+      if (a === 'fillnow' || a === 'fill') fill(j, true);
+      if (a === 'viewfill') native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}).then(() => { j.state = 'error'; j.failedAt = 'fill'; j.error = 'Opened Autofill to review. Press Push to Iconik there, or Fill metadata here.'; paintJobs(); });
+      if (a === 'openfill') { j.keepOpen = true; native('autofill', {jobId: j.id, url: AUTOFILL + '?' + new URLSearchParams({yt: j.yt, asset: j.assetUrl}), title: 'Iconik Autofill · ' + j.name, front: true}); }
+      if (a === 'retry') { JOBS = JOBS.filter(x => x !== j); const f = {path: j.path, name: j.name, size: j.size, seconds: j.seconds, mtime: j.mtime}; pickShow = j.channel; ytMode = j.ytMode; push(f); }
+      if (a === 'remove') { JOBS = JOBS.filter(x => x !== j); saveJobs(); paintMain(); updateBadge(); }
+    });
+  });
+}
+function pasteBox(j, primary) {
+  return `<div class="paste"><input type="text" data-pastein placeholder="${primary ? 'Paste the YouTube link' : 'Or paste the YouTube link'}"><button class="small ${primary ? 'gold' : ''}" data-paste>${j.assetUrl ? 'Fill metadata' : 'Use link'}</button></div>`;
+}
+
+/* ---------- drops ---------- */
+handlers.dragging = (on) => { const n = $('#next'); if (n) n.classList.toggle('dragging', !!on); };
+handlers.dropped = (files) => {
+  handlers.dragging(false);
+  const vids = (files || []).filter(f => /\.(mp4|mov|mxf|m4v|wav|mp3)$/i.test(f.name));
+  if (!vids.length) return toast('Drop a video file (mp4, mov…).', true);
+  if (!CFG || !CFG.setupDone) return toast('Finish setup first.', true);
+  vids.forEach(v => { if (!EXPORTS.some(x => x.path === v.path)) EXPORTS.unshift(v); });
+  selectFile(vids[0]);
+};
+
+/* ---------- boot ---------- */
+async function showMain(fresh) {
+  $('#setup').classList.add('hidden'); $('#main').classList.remove('hidden');
+  await loadExports();
+  selectFile(EXPORTS[0] || null);
+  if (fresh) maybeAutoPush();
+  pollYouTube(true);
+  updateBadge();
+  if (!FOLDERS) api('/app/folders').then(r => { FOLDERS = r.channels; paintMain(); }).catch(() => {});
+  // Captions status per show, so long videos only wait for captions where they'll be used.
+  CFG.shows.forEach(s => api('/app/show?channel=' + encodeURIComponent(s.channel)).then(i => {
+    SHOWINFO[s.channel] = i; s.captions = !!(i.youtube && i.youtube.connected);
+    if (i.youtube) s.youtube = {id: i.youtube.id, title: i.youtube.title, handle: i.youtube.handle};
+    JOBS.filter(j => j.channel === s.channel && !j.youtube && s.youtube).forEach(j => j.youtube = s.youtube);
+    saveCfg();
+  }).catch(() => {}));
+}
+$('#openSetup').onclick = () => startSetup(1);
+$('#refresh').onclick = async () => { await loadExports(); if (!SEL || !EXPORTS.some(x => fileKey(x) === fileKey(SEL))) selectFile(EXPORTS[0] || null); else paintMain(); toast('Exports refreshed.'); };
+$('#chooseFile').onclick = async () => { const f = await native('pickFile', {start: CFG.exportFolder}); if (f) handlers.dropped([f]); };
+// New exports show up when the window comes back to the front.
+let lastNewest = 0;
+window.addEventListener('focus', async () => {
+  if (!CFG || !CFG.setupDone || $('#main').classList.contains('hidden')) return;
+  const before = EXPORTS[0] && fileKey(EXPORTS[0]);
+  await loadExports();
+  const now = EXPORTS[0] && fileKey(EXPORTS[0]);
+  if (now !== before && !jobsBusySelecting()) selectFile(EXPORTS[0]); else paintMain();
+});
+const jobsBusySelecting = () => !!document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName);
+setInterval(() => { if (!$('#main').classList.contains('hidden')) paintJobs(); }, 30e3);
+
+// New version on the site → one-click update.
+async function checkUpdate() {
+  try {
+    const r = await fetch('https://robsjomboy.github.io/Iconik-Autofill/app/version.json?' + Date.now(), {cache: 'no-store'});
+    const v = await r.json();
+    const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+    if (v.version && BOOT.version !== 'dev' && newer(v.version, BOOT.version)) {
+      $('#updSlot').innerHTML = `<button class="small gold" id="updBtn" title="${esc(v.notes || '')}">Update to ${esc(v.version)}</button>`;
+      $('#updBtn').onclick = async () => {
+        if (JOBS.some(j => j.state === 'uploading')) return toast('Wait for the upload to finish, then update.', true);
+        $('#updBtn').disabled = true; $('#updBtn').innerHTML = '<span class="spinner"></span> Updating';
+        await native('update');
+      };
+    }
+  } catch {}
+}
+
+(async function boot() {
+  BOOT = await native('load');
+  CFG = BOOT.config && typeof BOOT.config === 'object' ? BOOT.config : null;
+  JOBS = Array.isArray(BOOT.jobs) ? BOOT.jobs : [];
+  // Anything mid-flight when the app last quit.
+  JOBS.forEach(j => {
+    if (j.state === 'uploading') { j.state = 'error'; j.failedAt = 'upload'; j.error = 'The app was closed during this upload.'; }
+    if (j.state === 'filling') { j.state = 'error'; j.failedAt = 'fill'; j.error = 'The app was closed while filling metadata.'; }
+  });
+  if (!CFG || !CFG.setupDone || !BOOT.hasKey) startSetup(CFG && CFG.setupDone ? 1 : 0);
+  else await showMain(true);
+  if (BOOT.opened && BOOT.opened.length && CFG && CFG.setupDone) handlers.dropped(BOOT.opened);
+  checkUpdate(); setInterval(checkUpdate, 6 * 3600e3);
+})();
+</script>
+</body>
+</html>

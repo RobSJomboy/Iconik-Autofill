@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Push to Iconik</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a1427;--panel:#111f3a;--rule:#22375e;--ink:#eef2fa;--mute:#93a3c2;--gold:#d6b24c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:56px 16px 80px}
+h1,h2{font-family:"Bebas Neue",Impact,sans-serif;font-weight:400;letter-spacing:.04em;margin:0}
+h1{font-size:clamp(44px,9vw,72px);line-height:.95}
+h1 em{color:var(--gold);font-style:normal}
+h2{font-size:28px;margin:34px 0 10px}
+p{color:var(--mute)}
+.cmd{display:flex;gap:8px;align-items:stretch;background:#060d1c;border:1px solid var(--rule);border-radius:12px;padding:8px;margin:14px 0}
+.cmd code{flex:1;font:14px/1.4 ui-monospace,Menlo,monospace;padding:10px;overflow-x:auto;white-space:nowrap;color:#f0cf6a}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:0 16px;background:var(--gold);color:#111;cursor:pointer}
+ol{padding-left:22px;color:var(--mute)} li{margin:6px 0} b{color:var(--ink)}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:16px 18px;margin-top:12px}
+small{color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Push to <em>Iconik</em></h1>
+  <p>Jomboy Media's Mac app for editors, producers and socials. Export, double-click, done. It uploads your export to the show's Iconik folder, waits for the video on YouTube, then fills the Iconik metadata and the monday ad reads.</p>
+
+  <h2>Install (one time)</h2>
+  <ol>
+    <li>Open <b>Terminal</b> (press ⌘ Space, type “Terminal”, press Return).</li>
+    <li>Paste this line and press Return:</li>
+  </ol>
+  <div class="cmd"><code id="c">curl -fsSL https://robsjomboy.github.io/Iconik-Autofill/app/install.sh | bash</code><button id="cp">Copy</button></div>
+  <ol start="3">
+    <li>The app opens by itself, and there's a <b>Push to Iconik</b> icon on your Desktop. Follow the setup. You'll need the team key from Rob Scirocco.</li>
+  </ol>
+  <div class="card"><small>Why Terminal? The app isn't from the App Store, so a browser download gets blocked by macOS. Installing this way skips that. Updates show up as an <b>Update</b> button inside the app.</small></div>
+
+  <h2>Every day</h2>
+  <ol>
+    <li>Export like you always do.</li>
+    <li>Double-click <b>Push to Iconik</b>. Your newest export uploads to the right show.</li>
+    <li>Close the window if you want. When the video is live on YouTube, the metadata fills itself and you get a notification.</li>
+  </ol>
+  <p><small>Requires macOS 12 or newer, on Apple Silicon or Intel. <a href="../" style="color:var(--gold)">Iconik Autofill</a> is the web version.</small></p>
+</main>
+<script>
+document.getElementById('cp').onclick = async (e) => { await navigator.clipboard.writeText(document.getElementById('c').textContent); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1500); };
+</script>
+</body>
+</html>
