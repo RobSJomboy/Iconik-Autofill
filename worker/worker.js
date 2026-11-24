@@ -777,11 +777,11 @@ async function uploadCompleteUrl(env, b) {
 }
 // A channel's newest YouTube uploads, each marked with whether Iconik already has it (Episode ID = video id),
 // or a likely untagged match by title.
-async function appMissing(env, channel, ytChannel, limit, source, cid) {
-  cid = assetIdFrom(cid);
+async function appMissing(env, channel, ytChannel, limit, source) {
   if (!/^UC[\w-]{22}$/.test(ytChannel || '')) throw new Error('YouTube channel id needed');
   limit = Math.min(Math.max(Number(limit) || 60, 10), 300);
-  let token = null; try { token = await ytAccess(env, ytChannel); } catch {}
+  let token = null;
+  for (let t = 0; t < 2 && !token; t++) { try { token = await ytAccess(env, ytChannel); } catch {} }   // Google's token endpoint blips now and then
   const auth = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
   const q = token ? '' : '&key=' + env.YT_KEY;
   // The channel's playlists, for the source picker (Podcast, etc.).
@@ -818,59 +818,78 @@ async function appMissing(env, channel, ytChannel, limit, source, cid) {
       scheduled: !!x.status.publishAt && x.status.privacyStatus !== 'public', live: x.snippet.liveBroadcastContent, wasLive: !!x.liveStreamingDetails,
       thumb: ((x.snippet.thumbnails || {}).medium || {}).url || '' });
   }
+  return { channel, source, playlists, signedIn: !!token, videos: vids, studio: `https://studio.youtube.com/channel/${ytChannel}/videos` };
+}
+
+// The Worker plan allows 50 outside calls per request, so the app asks for Iconik matches in chunks.
+// Linked assets: which videos already have an asset carrying their id (clips share the episode's id, so keep the
+// asset whose length matches the video, else the longest). body: { videos: [{id, seconds}] } (≤ 50)
+async function appLinked(env, body) {
+  const vids = (body.videos || []).slice(0, 50);
   const m = mapFields(await getView(env));
   const ep = m.episodeId && m.episodeId.name, md = m.metaDone && m.metaDone.name;
-  const val = (o, f) => [].concat(((o.metadata || {})[f]) || []).map((x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x)[0];
-  const have = new Map();
-  // Clips cut from an episode often carry the episode's video id too, so read every hit and keep, per video,
-  // the asset whose length matches the video (else the longest one).
+  const out = {};
+  if (!ep || !vids.length) return { linked: out };
   const secsOf = new Map(vids.map((v) => [v.id, v.seconds]));
   const score = (o, vid) => { const d = Math.abs((o.duration_milliseconds || 0) / 1000 - (secsOf.get(vid) || 0)); return d <= 3 ? 1e9 - d : (o.duration_milliseconds || 0) / 1000; };
-  if (ep) for (let i = 0; i < vids.length; i += 50) {
-    for (let page = 1; page <= 10; page++) {
-      const r = await ik(env, `/search/v1/search/?per_page=100&page=${page}&generate_signed_url=false`, { method: 'POST', body: JSON.stringify({
-        doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', `metadata.${ep}`, ...(md ? [`metadata.${md}`] : [])],
-        filter: { operator: 'AND', terms: [{ name: `metadata.${ep}`, value_in: vids.slice(i, i + 50).map((v) => v.id) }] } }) });
-      for (const o of r.objects || []) {
-        const vid = String(val(o, ep) || ''); if (!vid) continue;
-        const cur = have.get(vid), sc = score(o, vid);
-        if (!cur || sc > cur.sc) have.set(vid, { id: o.id, title: o.title, sc, done: md ? String(val(o, md)) === 'true' : true });
-      }
-      if (!r.pages || page >= r.pages) break;
+  for (let page = 1; page <= 40; page++) {
+    const r = await ik(env, `/search/v1/search/?per_page=100&page=${page}&generate_signed_url=false`, { method: 'POST', body: JSON.stringify({
+      doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', `metadata.${ep}`, ...(md ? [`metadata.${md}`] : [])],
+      filter: { operator: 'AND', terms: [{ name: `metadata.${ep}`, value_in: vids.map((v) => v.id) }] } }) });
+    for (const o of r.objects || []) {
+      const vid = String(mval(o, ep) || ''); if (!vid) continue;
+      const cur = out[vid], sc = score(o, vid);
+      if (!cur || sc > cur.sc) out[vid] = { id: o.id, title: o.title, sc, clips: (cur ? cur.clips : 0), url: 'https://app.iconik.io/asset/' + o.id, metaDone: md ? String(mval(o, md)) === 'true' : true };
+      out[vid].clips = (out[vid].clips || 0) + 1;
     }
+    if (!r.pages || page >= r.pages) break;
   }
-  // Not tagged with the video id: an asset in the channel's folder with the same length and no Episode ID
-  // (uploaded but never filled in), else one with the same title.
-  const todo = vids.filter((v) => !have.has(v.id) && v.live === 'none').slice(0, 120);
-  const maybe = new Map(), claimed = new Set([...have.values()].map((h) => h.id));
-  for (let i = 0; i < todo.length; i += 8) await Promise.all(todo.slice(i, i + 8).map(async (v) => {
+  // Only an asset as long as the video is the episode itself; shorter ones are clips that share its id.
+  const linked = {}, clipsOnly = {};
+  for (const [vid, a] of Object.entries(out)) { if (a.sc > 1e8) linked[vid] = a; else clipsOnly[vid] = a.clips; }
+  return { linked, clipsOnly };
+}
+const mval = (o, f) => [].concat(((o.metadata || {})[f]) || []).map((x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x)[0];
+// Unfilled copies: assets in the channel's Iconik folder with the video's length (±1.5 s) and no Episode ID,
+// e.g. the editor's final export when someone else filled a different asset. They count at ±1.5 s when they landed within
+// 3 weeks of the video, or at ±10 s when the filename has the episode's date, a day either side ("TB_October 14th…"). body: { cid, videos: [{id, seconds, published}] } (≤ 40)
+async function appCopies(env, body) {
+  const cid = assetIdFrom(body.cid);
+  if (!cid) throw new Error('channel folder id needed');
+  const finals = (body.finals || []).map(assetIdFrom).filter(Boolean).slice(0, 60);
+  const m = mapFields(await getView(env));
+  const ep = m.episodeId && m.episodeId.name;
+  const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const out = {};
+  const vids = (body.videos || []).filter((v) => v.seconds > 0).slice(0, 40);
+  for (let i = 0; i < vids.length; i += 8) await Promise.all(vids.slice(i, i + 8).map(async (v) => {
     try {
-      if (cid && v.seconds > 0) {
-        const r = await ik(env, '/search/v1/search/?per_page=15&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
-          doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', 'date_created', 'media_type', ...(ep ? [`metadata.${ep}`] : [])],
-          filter: { operator: 'AND', terms: [{ name: 'ancestor_collections', value_in: [cid] },
-            { name: 'duration_milliseconds', range: { min: String(v.seconds * 1000 - 1500), max: String(v.seconds * 1000 + 1500) } }] } }) });
-        // The finished export lands in Iconik around when the video goes up (raw recordings and old archive copies don't),
-        // and it's video, not a WAV.
-        const pub = Date.parse(v.publishAt || v.published);
-        // Archive copies imported later still count when the filename carries the episode's date ("TB_October 14th…").
-        const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-        const days = [-1, 0, 1].map((k) => { const d = new Date(pub - 5 * 3600e3 + k * 864e5); return [MON[d.getUTCMonth()], d.getUTCDate(), d.getUTCMonth() + 1]; });
-        const dated = (t) => { t = String(t || '').toLowerCase();
-          return days.some(([m, dd, mm]) => new RegExp(`\\b${m}[a-z]*\\.?[ _-]*0?${dd}(st|nd|rd|th)?\\b`).test(t)); };
-        const hit = (r.objects || []).find((o) => !(ep && val(o, ep)) && !claimed.has(o.id) && o.media_type !== 'audio'
-          && !/\.(wav|mp3|aif+)$/i.test(o.title || '') && (Math.abs(Date.parse(o.date_created) - pub) < 21 * 864e5 || dated(o.title)));
-        if (hit) { claimed.add(hit.id); maybe.set(v.id, { id: hit.id, title: hit.title, why: 'same length' }); return; }
-      }
-      if (v.seconds > 180) { const h = await findAssets(env, { title: v.title }); if (h.length && !claimed.has(h[0].id)) maybe.set(v.id, { id: h[0].id, title: h[0].title, why: 'same title' }); }
-    } catch {}
+      const r = await ik(env, '/search/v1/search/?per_page=15&generate_signed_url=false', { method: 'POST', body: JSON.stringify({
+        doc_types: ['assets'], include_fields: ['id', 'title', 'duration_milliseconds', 'date_created', 'media_type', ...(ep ? [`metadata.${ep}`] : [])],
+        // Only finished exports: inside the show's "Final Edits" folders when it has them (raw recordings share lengths).
+        filter: { operator: 'AND', terms: [{ name: 'ancestor_collections', value_in: finals.length ? finals : [cid] },
+          { name: 'duration_milliseconds', range: { min: String(Math.round(v.seconds * 1000 - 10000)), max: String(Math.round(v.seconds * 1000 + 10000)) } }] } }) });
+      const pub = Date.parse(v.published);
+      const days = [-1, 0, 1].map((k) => { const d = new Date(pub - 5 * 3600e3 + k * 864e5); return [MON[d.getUTCMonth()], d.getUTCDate()]; });
+      const dated = (t) => { t = String(t || '').toLowerCase(); return days.some(([mo, dd]) => new RegExp(`(^|[^a-z])${mo}[a-z]*\\.?[ _-]*0?${dd}(st|nd|rd|th)?([^0-9a-z]|$)`).test(t)); };
+      const hits = (r.objects || []).filter((o) => !(ep && mval(o, ep)) && o.media_type !== 'audio' && !/\.(wav|mp3|aif+)$/i.test(o.title || '')
+        && ((Math.abs(o.duration_milliseconds / 1000 - v.seconds) <= 1.5 && Math.abs(Date.parse(o.date_created) - pub) < 21 * 864e5)
+          || dated(o.title)));                     // exports run a few seconds off a live VOD, so a dated filename gets ±10 s
+      if (hits.length) out[v.id] = hits.map((o) => ({ id: o.id, title: o.title, url: 'https://app.iconik.io/asset/' + o.id, dated: dated(o.title) }));
+    } catch (e) { out[v.id] = { error: String(e.message).slice(0, 120) }; }
   }));
-  for (const v of vids) {
-    const h = have.get(v.id), mb = maybe.get(v.id);
-    v.inIconik = h ? { id: h.id, title: h.title, url: 'https://app.iconik.io/asset/' + h.id, metaDone: h.done } : null;
-    v.maybe = !h && mb ? { id: mb.id, title: mb.title, why: mb.why, url: 'https://app.iconik.io/asset/' + mb.id } : null;
-  }
-  return { channel, source, playlists, signedIn: !!token, videos: vids, studio: `https://studio.youtube.com/channel/${ytChannel}/videos` };
+  return { copies: out };
+}
+// Sub-folders for up to 40 folders at once (Channels › channel › series › Final Edits …).
+async function appSubfolders(env, ids) {
+  const out = {};
+  await Promise.all(ids.slice(0, 40).map(async (id) => {
+    const k = 'kids:' + id;
+    let v = await env.YT_AUTH.get(k, 'json');
+    if (!v) { v = await collectionKids(env, id).catch(() => []); await env.YT_AUTH.put(k, JSON.stringify(v), { expirationTtl: 6 * 3600 }); }
+    out[id] = v;
+  }));
+  return { kids: out };
 }
 
 async function appRoute(env, url, request) {
@@ -894,13 +913,16 @@ async function appRoute(env, url, request) {
     if (request.method === 'POST') {
       const rules = (Array.isArray(body.rules) ? body.rules : []).filter((r) => r && r.pattern && r.channelId).slice(0, 200)
         .map((r) => ({ pattern: String(r.pattern).slice(0, 80), channel: String(r.channel || ''), channelId: String(r.channelId),
-          series: String(r.series || ''), seriesId: String(r.seriesId || ''), by: String(r.by || '').slice(0, 60) }));
+          series: String(r.series || ''), seriesId: String(r.seriesId || ''), sub: String(r.sub || ''), subId: String(r.subId || ''), by: String(r.by || '').slice(0, 60) }));
       await env.YT_AUTH.put('app:rules', JSON.stringify({ rules, updated: new Date().toISOString(), by: String(body.by || '').slice(0, 60) }));
       return { ok: true, count: rules.length };
     }
     return (await env.YT_AUTH.get('app:rules', 'json')) || { rules: [] };
   }
-  if (p === '/app/missing') return await appMissing(env, url.searchParams.get('channel') || '', url.searchParams.get('yt') || '', url.searchParams.get('limit'), url.searchParams.get('source'), url.searchParams.get('cid'));
+  if (p === '/app/linked') return await appLinked(env, body);
+  if (p === '/app/copies') return await appCopies(env, body);
+  if (p === '/app/subfolders') return await appSubfolders(env, String(url.searchParams.get('ids') || '').split(',').filter(Boolean));
+  if (p === '/app/missing') return await appMissing(env, url.searchParams.get('channel') || '', url.searchParams.get('yt') || '', url.searchParams.get('limit'), url.searchParams.get('source'));
   if (p === '/app/youtube/recent') return await ytRecent(env, url.searchParams.get('channel'));
   if (p === '/app/upload/parts') return await uploadParts(env, body);
   if (p === '/app/upload/complete-url') return await uploadCompleteUrl(env, body);
