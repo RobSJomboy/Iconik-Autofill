@@ -44,6 +44,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn:hover{border-color:var(--gold)}
 .btn.go{background:var(--gold);color:var(--gold-ink);border-color:var(--gold);font:400 22px/1 var(--display);letter-spacing:.06em;padding:14px 26px}
 .btn:disabled{opacity:.5;cursor:default}
+.found{font:500 13px/1.45 var(--mono);color:var(--dim);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.found:empty{display:none}
+.found b{color:var(--ink)}
+.found .alt{background:none;border:1px solid var(--rule);border-radius:4px;padding:2px 8px;font:inherit;font-size:12px;cursor:pointer;color:inherit}
+.found .alt:hover{border-color:var(--gold)}
+a.btn{text-decoration:none;display:inline-flex;align-items:center}
 .status{min-height:22px;font:500 13px/1.4 var(--mono);color:var(--dim)}
 .status.err{color:var(--warn)}
 
@@ -130,6 +136,7 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
       <p>Paste the YouTube link, check the picks, hit Push to Iconik. Every field lands in the Iconik metadata panel.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn go" href="app/" id="getApp" title="Mac app: push your export to Iconik with a double-click, find and fill missing videos">Get the Mac app</a>
       <button class="btn" id="editLists" type="button">Dropdown lists</button>
     </div>
   </div>
@@ -146,9 +153,10 @@ dialog footer{display:flex;justify-content:space-between;align-items:center;gap:
       <input type="file" id="thumbFile" accept="image/jpeg,image/png,image/webp" hidden>
     </div>
     <span class="label">Iconik asset</span>
-    <input id="asset" type="text" autocomplete="off" spellcheck="false" placeholder="Optional: paste the Iconik asset link. Blank = find it by title" aria-label="Iconik asset link">
+    <input id="asset" type="text" autocomplete="off" spellcheck="false" placeholder="Found automatically from the video. Or paste an Iconik asset link" aria-label="Iconik asset link">
     <button class="btn go" id="push" type="button" disabled>Push to Iconik</button>
   </div>
+  <div class="found" id="ikFound"></div>
   <div class="status" id="status" role="status"></div>
   <div class="picks" id="picks"></div>
 
@@ -434,6 +442,31 @@ function pageLabel(k, val){
   return list.find(o => o === val || o.replace(/^\d+\s*[-.]\s*/,'') === val || o.toLowerCase() === String(val).toLowerCase()) || '';
 }
 const LEARN_MAP = {OwningCreater:'owningCreator', GuestCreator:'guestCreator', TopTags:'topTags', Series:'series', Producer:'producer', Editor:'editor', League2:'sport', MLBFootage:'mlbFootage'};
+// Which Iconik asset this video goes on: an unfilled export in the show's Final Edits (same length, or same
+// date in the filename), else the asset already linked to the video. Fills the asset box; others are one click away.
+async function findIconik(v){
+  const box = document.getElementById('ikFound'); box.innerHTML = '';
+  if (!v.lengthSeconds || window.FORCED_ASSET) return;     // the Mac app already said which asset
+  box.textContent = 'Looking for this video in Iconik…';
+  let d;
+  try{
+    const q = new URLSearchParams({v: v.id, seconds: v.lengthSeconds, published: v.publishDate || '', channel: state.values.channel || ''});
+    const r = await fetch(`${YT_API}/iconik/find?${q}`); d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || r.status);
+  }catch{ if (state.video === v) box.innerHTML = ''; return; }
+  if (state.video !== v) return;
+  const opts = [...(d.copies || []).map(c => ({...c, why: c.dated ? 'final edit with this date, no metadata yet' : 'final edit, same length, no metadata yet'})),
+    ...(d.linked ? [{...d.linked, why: d.linked.metaDone ? 'already filled: pushing updates it' : 'linked to this video, not finished'}] : [])];
+  if (!opts.length){ box.innerHTML = `Not found in Iconik${d.channelFolder ? ` (${esc(d.channelFolder)} › Final Edits)` : ''}. Paste the asset link, or upload it with the <a href="app/">Mac app</a>.`; return; }
+  const pick = (o) => {
+    document.getElementById('asset').value = o.url;
+    box.innerHTML = `Iconik: <b><a href="${esc(o.url)}" target="_blank" rel="noopener">${esc(o.title)}</a></b> <span>(${esc(o.why)})</span>` +
+      opts.filter(x => x !== o).map(x => `<button class="alt" type="button" data-alt="${opts.indexOf(x)}">Use ${esc(x.title)} instead</button>`).join('');
+    box.querySelectorAll('[data-alt]').forEach(b => b.onclick = () => pick(opts[+b.dataset.alt]));
+  };
+  if (!document.getElementById('asset').value.trim()) pick(opts[0]);
+}
+
 async function applyLearned(v){
   let d;
   try{
@@ -493,7 +526,7 @@ async function generate(){
     v = await r.json();
     if (!r.ok || v.error) throw new Error(v.error || ('HTTP '+r.status));
   }catch(e){
-    setStatus('YouTube didn’t answer that time. Hit Generate again; if it keeps failing, check the video is public or unlisted (not private or scheduled).', true);
+    setStatus('YouTube didn’t return that video. Hit Generate again. Scheduled and private videos work once the show’s YouTube channel is connected (a channel manager opens jomboy-yt.jomboymedia.workers.dev/yt/connect once).', true);
     $('#go').disabled = false; return;
   }
   state.video = v; state.showAllTags = false;
@@ -509,6 +542,7 @@ async function generate(){
   // Check Iconik for the channel's usual owners; only replaces the default if nobody has edited it yet.
   loadMonday(v);
   applyLearned(v);
+  findIconik(v);
   setStatus('YouTube fields are in. Asking AI for the description and tags…');
 
   try{
@@ -899,6 +933,7 @@ const listsLoaded = loadLists();
   history.replaceState(null, '', location.pathname);
   try{ await listsLoaded; }catch{}
   $('#url').value = yt;
+  window.FORCED_ASSET = q.get('asset') || '';
   await generate();
   const asset = q.get('asset') || '';
   if (asset) $('#asset').value = asset;
